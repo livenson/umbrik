@@ -84,7 +84,9 @@ gh attestation verify ./umbrik --repo livenson/umbrik
 - [x] Private vulnerability reporting — `SECURITY.md` links to the advisory form
 - [x] Dependabot alerts and security updates
 - [x] Secret scanning with push protection
-- [ ] Branch protection on `main`, requiring CI and interop
+- [x] Branch protection on `main`: build, interop, licences and CodeQL must pass; no force
+      pushes or deletions. Admin bypass is left on so a solo maintainer can still push directly
+      — turn `enforce_admins` on if the project gains contributors
 - [ ] A `pypi` deployment environment, ideally with a required reviewer
 - [ ] A PyPI trusted publisher for `livenson/umbrik`, workflow `python.yml`, environment `pypi`
 
