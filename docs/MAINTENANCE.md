@@ -85,10 +85,30 @@ gh attestation verify ./umbrik --repo livenson/umbrik
 - [x] Dependabot alerts and security updates
 - [x] Secret scanning with push protection
 - [x] Branch protection on `main`: build, interop, licences and CodeQL must pass; no force
-      pushes or deletions. Admin bypass is left on so a solo maintainer can still push directly
-      — turn `enforce_admins` on if the project gains contributors
+      pushes or deletions; enforced for administrators too
 - [ ] A `pypi` deployment environment, ideally with a required reviewer
 - [ ] A PyPI trusted publisher for `livenson/umbrik`, workflow `python.yml`, environment `pypi`
+
+## Changes go through pull requests
+
+Branch protection is enforced for administrators, so `main` takes no direct pushes — including
+from the owner. Every change, however small, goes through a PR that build, interop, licences and
+CodeQL must pass.
+
+Reviews are not required, so a solo maintainer can merge their own PR once it is green. The point
+is not review; it is that nothing reaches `main` without the interop job having run against it.
+
+```bash
+git switch -c fix-something
+# ... work, commit ...
+git push -u origin fix-something
+gh pr create --fill
+gh pr merge --squash --delete-branch   # once checks pass
+```
+
+In a genuine emergency, protection can be lifted with
+`gh api -X DELETE repos/livenson/umbrik/branches/main/protection` and restored afterwards. Doing
+so means the next push is unverified, so restore it in the same sitting.
 
 ## Always manual
 
