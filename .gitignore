@@ -1,0 +1,13 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+.DS_Store
+
+# cargo-fuzz
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/coverage
+
+# Containers produced while trying things out; test vectors live in tests/vectors/
+/*.cdoc2

@@ -1,0 +1,17 @@
+[package]
+name = "umbrik-pkcs11"
+description = "PKCS#11 key provider for umbrik: ID-cards and hardware tokens"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+umbrik-core = { path = "../umbrik-core", version = "0.0.1" }
+cryptoki.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+rand_core = { workspace = true, features = ["getrandom"] }

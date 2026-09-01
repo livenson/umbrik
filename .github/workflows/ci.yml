@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      # umbrik generates its FlatBuffers codec at build time. The flatc version must match the
+      # `flatbuffers` crate version pinned in Cargo.toml.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          # flatc generates the FlatBuffers codec; its version must match the `flatbuffers`
+          # crate pinned in Cargo.toml. libssl-dev is for native-tls, which umbrik-ldap
+          # requires because the SK directory needs a cipher suite rustls will not offer.
+          # softhsm2 + opensc give a software PKCS#11 token, so the card code path is tested
+          # without hardware. See crates/umbrik-pkcs11/tests/setup-softhsm.sh.
+          sudo apt-get install -y flatbuffers-compiler libssl-dev pkg-config softhsm2 opensc
+          flatc --version
+
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features
+
+      # Prepare a SoftHSM token so the PKCS#11 tests run for real rather than skipping.
+      # Without this they skip silently, which would hide a regression.
+      - name: Prepare SoftHSM token
+        run: |
+          eval "$(crates/umbrik-pkcs11/tests/setup-softhsm.sh)"
+          {
+            echo "SOFTHSM2_CONF=$SOFTHSM2_CONF"
+            echo "UMBRIK_PKCS11_MODULE=$UMBRIK_PKCS11_MODULE"
+            echo "UMBRIK_PKCS11_PIN=$UMBRIK_PKCS11_PIN"
+          } >> "$GITHUB_ENV"
+
+      - name: Confirm the PKCS#11 tests are not skipping
+        run: |
+          test -n "$UMBRIK_PKCS11_MODULE" || { echo "SoftHSM setup did not export a module"; exit 1; }
+
+      - run: cargo test --all-features
+      - run: cargo test --release --all-features
+      # The network-free build must keep working: it is what someone deploys when the tool
+      # must not reach out to a directory.
+      - run: cargo build -p umbrik-cli --no-default-features
+      - run: cargo clippy -p umbrik-cli --no-default-features --all-targets
+
+  interop:
+    name: Interop against cdoc2-cli
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatbuffers-compiler libssl-dev pkg-config
+
+      # Runners are x86_64, so no emulation is needed for the reference build.
+      - name: Round-trip both directions
+        env:
+          UMBRIK_INTEROP_PLATFORM: linux/amd64
+        run: tests/interop/run.sh
+
+  deny:
+    name: Licenses and advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses advisories bans sources

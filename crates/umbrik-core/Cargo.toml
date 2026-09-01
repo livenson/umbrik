@@ -1,0 +1,39 @@
+[package]
+name = "umbrik-core"
+description = "CDOC2 encrypted container format: header codec and encryption schemes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+flatbuffers.workspace = true
+chacha20poly1305.workspace = true
+pbkdf2.workspace = true
+tar.workspace = true
+flate2.workspace = true
+rand_core.workspace = true
+p384.workspace = true
+p256.workspace = true
+rsa.workspace = true
+x509-cert.workspace = true
+hkdf.workspace = true
+sha2.workspace = true
+sha1.workspace = true
+hmac.workspace = true
+zeroize.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+hex = "=0.4.3"
+base64 = "=0.22.1"
+# Test-only: the SC05 KEK derivation used to obtain a known FMK for the M1 gate.
+# Moves into `schemes::sc05` in M2.
+hkdf.workspace = true
+sha2.workspace = true
+rand_core.workspace = true
+flate2.workspace = true
+zeroize.workspace = true

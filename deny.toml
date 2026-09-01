@@ -1,0 +1,67 @@
+# cargo-deny configuration.
+#
+# umbrik is MIT. Two licensing rules matter for this project.
+#
+# 1. No copyleft code may enter the *linked* dependency graph. `libcdoc` and
+#    `cdoc2-capsule-server` are LGPL-2.1 and may be read for understanding, never vendored or
+#    transliterated.
+#
+# 2. PKCS#11 modules are a deliberate exception, and the distinction is linkage. OpenSC and the
+#    Estonian eID module are LGPL, but umbrik never links them: `cryptoki` loads a module at
+#    runtime with `dlopen` across the stable PKCS#11 C ABI, and the user supplies the path. That
+#    is the ordinary arrangement for PKCS#11 and imposes nothing on umbrik. It stays true only
+#    as long as no module is ever bundled, vendored, or statically linked here.
+#
+# Apache-2.0 dependencies (cryptoki, flatbuffers, openssl bindings, rpassword) are permissive and
+# compatible with MIT. They carry an attribution requirement, which the generated SBOM and
+# release artifacts satisfy.
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[advisories]
+version = 2
+yanked = "deny"
+
+ignore = [
+    # Marvin Attack: the `rsa` crate's private-key operation is not fully constant-time, so an
+    # attacker who can have many chosen ciphertexts decrypted *and* measure the timing precisely
+    # may recover the key. There is no fixed release; the maintainers have no constant-time
+    # implementation to upgrade to.
+    #
+    # Exposure in umbrik is limited to **SC02 decryption with a software RSA key**:
+    #
+    #   - SC02 with a card or token is unaffected. RSA-OAEP runs inside the PKCS#11 module, and
+    #     the private key never reaches this crate. Estonian legacy RSA cards take this path.
+    #   - SC01, SC05 and SC06 never touch `rsa` at all.
+    #   - Encryption is unaffected: it is a public-key operation.
+    #
+    # Exploiting it requires a decryption oracle — the victim decrypting many attacker-chosen
+    # containers while the attacker times each one. A person decrypting a file they received is
+    # not in that position; an automated service built on umbrik that decrypts untrusted
+    # containers on demand would be, and should use a token for RSA keys.
+    #
+    # Recorded rather than silenced so the trade-off stays visible in CI output. Revisit if a
+    # constant-time RSA implementation becomes available.
+    { id = "RUSTSEC-2023-0071", reason = "no fixed release; limited to software-RSA SC02 decryption, see SECURITY.md" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

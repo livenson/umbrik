@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = ["crates/umbrik-core", "crates/umbrik-ldap", "crates/umbrik-pkcs11", "crates/umbrik-cli"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/livenson/umbrik"
+authors = ["Ilja Livenson"]
+
+[workspace.dependencies]
+flatbuffers = "=25.12.19"
+hkdf = "=0.12.4"
+sha2 = "=0.10.9"
+sha1 = "=0.10.6"
+hmac = "=0.12.1"
+chacha20poly1305 = "=0.10.1"
+zeroize = { version = "=1.8.1", features = ["zeroize_derive"] }
+subtle = "=2.6.1"
+thiserror = "=2.0.20"
+rand_core = "=0.6.4"
+pbkdf2 = { version = "=0.12.2", default-features = false, features = ["hmac"] }
+tar = "=0.4.45"
+flate2 = "=1.1.2"
+clap = { version = "=4.5.51", features = ["derive"] }
+anyhow = "=1.0.103"
+rpassword = "=7.4.0"
+rand = "=0.8.6"
+p384 = { version = "=0.13.1", default-features = false, features = ["ecdh", "pem", "std"] }
+p256 = { version = "=0.13.2", default-features = false, features = ["ecdh", "pem", "std"] }
+rsa = { version = "=0.9.8", features = ["sha2"] }
+x509-cert = { version = "=0.2.5", features = ["pem"] }
+cryptoki = "=0.12.0"
+# native-tls, NOT rustls. esteid.ldap.sk.ee negotiates TLS 1.2 with AES256-GCM-SHA384, a static
+# RSA key-exchange suite with no forward secrecy that rustls deliberately does not implement, so
+# a rustls build cannot connect to it at all — and that directory holds the ID-card certificates.
+# See crates/umbrik-ldap/src/lib.rs. Do not "modernise" this back to rustls.
+ldap3 = { version = "=0.12.1", default-features = false, features = ["sync", "tls-native"] }
+
+[profile.release]
+overflow-checks = true

@@ -1,0 +1,34 @@
+[package]
+name = "umbrik-cli"
+description = "Command-line interface for the CDOC2 encrypted container format"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "umbrik"
+path = "src/main.rs"
+
+[features]
+default = ["ldap", "pkcs11"]
+# Resolve `-r <isikukood>` through the Estonian eID directory. Off by default in library
+# contexts; on here because it is a headline feature of the tool. Build with
+# `--no-default-features` for a binary that makes no network connections at all.
+ldap = ["dep:umbrik-ldap"]
+# Decrypt with a smart card or hardware token. Pure Rust plus a runtime `dlopen`, no system
+# build dependencies, so it is on by default.
+pkcs11 = ["dep:umbrik-pkcs11"]
+
+[dependencies]
+umbrik-core = { path = "../umbrik-core", version = "0.0.1" }
+umbrik-ldap = { path = "../umbrik-ldap", version = "0.0.1", optional = true }
+umbrik-pkcs11 = { path = "../umbrik-pkcs11", version = "0.0.1", optional = true }
+clap.workspace = true
+anyhow.workspace = true
+rpassword.workspace = true
+rand.workspace = true
+base64 = "=0.22.1"
+zeroize.workspace = true

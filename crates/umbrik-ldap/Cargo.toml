@@ -1,0 +1,13 @@
+[package]
+name = "umbrik-ldap"
+description = "Estonian eID directory lookup: resolve an id code (isikukood) to a recipient certificate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+umbrik-core = { path = "../umbrik-core", version = "0.0.1" }
+ldap3.workspace = true
