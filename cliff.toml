@@ -25,8 +25,7 @@ body = """
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | upper_first }}
 {% for commit in commits %}
-- {{ commit.message | split(pat="\n") | first | upper_first }}\
-{% if commit.remote.pr_number %} (#{{ commit.remote.pr_number }}){% endif %}
+- {{ commit.message | split(pat="\n") | first | upper_first }}
 {%- endfor %}
 {% endfor %}
 """
@@ -51,8 +50,12 @@ commit_parsers = [
   { message = "^refactor", group = "Changed" },
   { message = "^docs", group = "Documentation" },
   { message = "^test", group = "Testing" },
-  { message = "^ci|^build", group = "Build and CI" },
-  { message = "^chore\\(deps\\)|^deps", group = "Dependencies" },
+  # Dependency bumps before the build rule, so Dependabot's "build(deps):" lands correctly.
+  { message = "^build\\(deps\\)|^chore\\(deps\\)|^deps", group = "Dependencies" },
+  # Internal CI plumbing is not a user-visible change. It is in the git log for whoever needs
+  # it; a changelog that lists runner-label fixes buries the things people actually read it for.
+  { message = "^ci", skip = true },
+  { message = "^build", group = "Build" },
   { message = "^chore|^style", skip = true },
 
   # Security first: an advisory or a hardening change should never be buried under "Changed".
