@@ -1,0 +1,42 @@
+# Automated dependency updates.
+#
+# umbrik pins every dependency to an exact version (`=x.y.z`), which is deliberate: a
+# cryptographic library should not silently change the code that derives its keys. The cost of
+# that choice is that nothing updates on its own, so Dependabot is what keeps the pins moving.
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # Grouped so a routine week is one reviewable PR rather than a dozen. Security updates are
+    # never grouped with version updates by Dependabot, so an advisory still arrives on its own.
+    groups:
+      rust-dependencies:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    # Major bumps of the cryptographic crates arrive as individual PRs: each one needs the
+    # interop job to pass before it can be trusted, and reviewing them in a batch hides which
+    # change broke what.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: ["dependencies", "ci"]
+
+  # The Rust toolchain itself, once rust-toolchain.toml exists.
+  - package-ecosystem: rust-toolchain
+    directory: "/"
+    schedule:
+      interval: monthly
+    labels: ["dependencies"]

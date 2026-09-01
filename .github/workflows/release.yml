@@ -1,0 +1,112 @@
+name: Release
+
+# Builds release binaries, generates an SBOM, and signs both with GitHub Artifact Attestations.
+#
+# Attestations bind each artifact's SHA-256 digest to the workflow, repository and commit that
+# produced it, signed through Sigstore with a short-lived certificate. There is no long-lived
+# signing key to store or leak. A consumer verifies with:
+#
+#   gh attestation verify ./umbrik --repo livenson/umbrik
+#
+# For an unaudited cryptographic tool this matters more than usual: it lets someone confirm the
+# binary they downloaded came from the source they can read, and not from somewhere else.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: macos-latest,   target: aarch64-apple-darwin }
+          - { os: macos-13,       target: x86_64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatbuffers-compiler libssl-dev pkg-config
+
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install flatbuffers
+
+      - run: cargo build --release --target ${{ matrix.target }} -p umbrik-cli
+
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/umbrik" "dist/umbrik-${{ matrix.target }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: umbrik-${{ matrix.target }}
+          path: dist/umbrik-${{ matrix.target }}
+          if-no-files-found: error
+
+  attest:
+    name: SBOM and attestations
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # attach artifacts to the release
+      id-token: write     # mint the OIDC token Sigstore signs against
+      attestations: write # persist the attestations
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatbuffers-compiler libssl-dev pkg-config
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # CycloneDX rather than SPDX: it records the exact resolved versions from Cargo.lock,
+      # which is what someone auditing a cryptographic dependency actually needs.
+      # cargo-cyclonedx writes one SBOM per crate. The released artifact is the CLI binary, so
+      # its SBOM is the one that describes what is actually shipped — it transitively covers
+      # umbrik-core, umbrik-ldap and umbrik-pkcs11.
+      - name: Generate SBOM
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --format json --all --override-filename umbrik-sbom
+          cp crates/umbrik-cli/umbrik-sbom.json dist/umbrik-sbom.json
+          python3 -c "import json,sys; d=json.load(open('dist/umbrik-sbom.json')); print(f\"SBOM: {len(d['components'])} components\")"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/umbrik-*"
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: "dist/umbrik-x86_64-unknown-linux-gnu"
+          sbom-path: dist/umbrik-sbom.json
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/* --clobber

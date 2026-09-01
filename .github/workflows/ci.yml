@@ -9,10 +9,16 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
+# Deny by default; each job requests only what it needs. A workflow token with write access it
+# never uses is a standing risk, and OpenSSF Scorecard flags it.
+permissions: {}
+
 jobs:
   test:
     name: Build and test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -61,6 +67,8 @@ jobs:
   interop:
     name: Interop against cdoc2-cli
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -80,8 +88,31 @@ jobs:
   deny:
     name: Licenses and advisories
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check licenses advisories bans sources
+
+  dependency-review:
+    name: Dependency review
+    # Blocks a pull request that introduces a dependency with a known vulnerability or a
+    # disallowed licence, before it is merged rather than after.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: low
+          comment-summary-in-pr: always
+          # Mirrors deny.toml. Copyleft in the linked graph is the rule that matters: see the
+          # note there about PKCS#11 modules, which are loaded at runtime and not linked.
+          allow-licenses: >-
+            MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-2-Clause,
+            BSD-3-Clause, ISC, Unicode-3.0, Zlib, 0BSD, Unlicense

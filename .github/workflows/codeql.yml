@@ -1,0 +1,41 @@
+name: CodeQL
+
+# Semantic analysis for Rust — generally available since October 2025. It looks for a different
+# class of problem than clippy: cryptographic misuse, injection, unsafe handling of untrusted
+# data. That overlaps exactly with umbrik's attack surface, where container bytes are attacker
+# controlled and parsed before anything is authenticated.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so newly published queries reach existing code rather than only new commits.
+    - cron: "27 4 * * 1"
+
+permissions: {}
+
+jobs:
+  analyze:
+    name: Analyze Rust
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatbuffers-compiler libssl-dev pkg-config
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          queries: security-extended
+
+      - uses: github/codeql-action/autobuild@v3
+
+      - uses: github/codeql-action/analyze@v3

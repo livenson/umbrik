@@ -221,6 +221,16 @@ tests/interop/run.sh    # both directions against the reference cdoc2-cli in Doc
 Interop is a CI gate. Test vectors in `tests/vectors/` were produced by the reference
 implementation, not by umbrik — see `tests/vectors/PROVENANCE.md`.
 
+Releases are built in CI, ship a CycloneDX SBOM, and are signed with GitHub Artifact
+Attestations:
+
+```bash
+gh attestation verify ./umbrik --repo livenson/umbrik
+```
+
+See [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md) for what runs automatically and what still
+needs a person.
+
 ## Acknowledgements
 
 CDOC2 is specified and maintained by [RIA](https://www.ria.ee/) and Cybernetica. The
