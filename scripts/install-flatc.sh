@@ -30,6 +30,29 @@ BIN_DIR="${FLATC_BIN_DIR:-/usr/local/bin}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Install without assuming a writable prefix or that sudo exists — Windows git-bash has no
+# sudo, and a custom FLATC_BIN_DIR may not exist yet.
+install_flatc() {
+  src="$1"
+  mkdir -p "$BIN_DIR" 2>/dev/null || sudo mkdir -p "$BIN_DIR"
+  dest="$BIN_DIR/$(basename "$src")"
+  if install -m 0755 "$src" "$dest" 2>/dev/null; then
+    :
+  elif command -v sudo >/dev/null 2>&1 && sudo install -m 0755 "$src" "$dest" 2>/dev/null; then
+    :
+  else
+    cp "$src" "$dest"
+    chmod 0755 "$dest" 2>/dev/null || true
+  fi
+  echo "installed $dest"
+  "$dest" --version
+}
+
+# The archive holds flatc.exe on Windows.
+extracted_flatc() {
+  if [ -f "$TMP/flatc.exe" ]; then echo "$TMP/flatc.exe"; else echo "$TMP/flatc"; fi
+}
+
 base="https://github.com/google/flatbuffers/releases/download/v${VERSION}"
 asset=""
 case "$(uname -s)-$(uname -m)" in
@@ -43,8 +66,7 @@ if [ -n "$asset" ]; then
   echo "downloading $asset"
   curl -fsSL "$base/$asset" -o "$TMP/flatc.zip"
   unzip -q "$TMP/flatc.zip" -d "$TMP"
-  install -m 0755 "$TMP/flatc" "$BIN_DIR/flatc" 2>/dev/null \
-    || sudo install -m 0755 "$TMP/flatc" "$BIN_DIR/flatc"
+  install_flatc "$(extracted_flatc)"
 else
   # No official binary for this platform — Linux arm64 in particular. Building takes a few
   # minutes but is the only way to get the exact version.
@@ -55,8 +77,5 @@ else
   cmake -S "$TMP/flatbuffers" -B "$TMP/build" \
     -DCMAKE_BUILD_TYPE=Release -DFLATBUFFERS_BUILD_TESTS=OFF
   cmake --build "$TMP/build" --target flatc -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
-  install -m 0755 "$TMP/build/flatc" "$BIN_DIR/flatc" 2>/dev/null \
-    || sudo install -m 0755 "$TMP/build/flatc" "$BIN_DIR/flatc"
+  install_flatc "$TMP/build/flatc"
 fi
-
-flatc --version
