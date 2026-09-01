@@ -41,6 +41,12 @@ enum Command {
         /// Pre-shared key recipient (SC05), as `label:base64,<key>`. Repeatable.
         #[arg(long = "secret", value_name = "LABEL:base64,KEY")]
         secrets: Vec<String>,
+        /// Encrypt to a certificate whose validity window has passed, or not yet begun.
+        ///
+        /// Refused by default: an expired certificate usually means the card has been replaced,
+        /// and the container would be one the recipient cannot open.
+        #[arg(long = "allow-expired")]
+        allow_expired: bool,
         /// Recipient X.509 certificate, PEM or DER (SC01 for EC keys, SC02 for RSA). Repeatable.
         #[arg(short = 'c', long = "cert", value_name = "FILE")]
         certs: Vec<PathBuf>,
@@ -217,6 +223,34 @@ fn collect_files(inputs: &[PathBuf]) -> Result<Vec<PayloadFile>> {
     Ok(files)
 }
 
+/// Refuse a certificate outside its validity window unless the caller opted in.
+///
+/// This is a check umbrik can make cheaply and usefully. Chain and revocation checking are
+/// deliberately absent — see the note in `umbrik_core::cert`.
+fn check_validity(
+    parsed: &cert::CertificateRecipient,
+    describe: &str,
+    allow_expired: bool,
+) -> Result<()> {
+    use umbrik_core::cert::Validity;
+
+    let what = match parsed.validity_now() {
+        Validity::Valid | Validity::Unknown => return Ok(()),
+        Validity::Expired => "has expired",
+        Validity::NotYetValid => "is not valid yet",
+    };
+
+    if allow_expired {
+        eprintln!("  warning: the certificate for {describe} {what}");
+        return Ok(());
+    }
+    bail!(
+        "the certificate for {describe} {what}.\n\
+         Encrypting to it would most likely produce a container the recipient cannot open, \
+         because the card has been replaced. Pass --allow-expired to do it anyway."
+    )
+}
+
 /// Parse a certificate from PEM or DER, deciding by content rather than extension.
 fn load_certificate(path: &Path) -> Result<cert::CertificateRecipient> {
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
@@ -378,6 +412,7 @@ struct EncryptRequest<'a> {
     password: Option<&'a str>,
     secrets: &'a [String],
     certs: &'a [PathBuf],
+    allow_expired: bool,
     pubkeys: &'a [String],
     #[cfg(feature = "ldap")]
     id_codes: &'a [String],
@@ -392,6 +427,7 @@ fn run_encrypt(req: EncryptRequest<'_>) -> Result<()> {
         password,
         secrets,
         certs,
+        allow_expired,
         pubkeys,
         #[cfg(feature = "ldap")]
         id_codes,
@@ -490,6 +526,7 @@ fn run_encrypt(req: EncryptRequest<'_>) -> Result<()> {
         }
         for found_match in found {
             let parsed = found_match.recipient;
+            check_validity(&parsed, id_code, allow_expired)?;
             let common_name = parsed
                 .common_name
                 .clone()
@@ -524,6 +561,8 @@ fn run_encrypt(req: EncryptRequest<'_>) -> Result<()> {
         // certificates. The `TYPE=ID-card` form is reserved for the directory lookup path,
         // where the card type is actually known from the directory entry rather than guessed
         // from the certificate contents.
+        check_validity(&parsed, &path.display().to_string(), allow_expired)?;
+
         let label = keylabel::certificate(
             parsed.common_name.as_deref(),
             Some(&parsed.sha1),
@@ -588,6 +627,7 @@ fn main() -> Result<()> {
             password,
             secrets,
             certs,
+            allow_expired,
             pubkeys,
             #[cfg(feature = "ldap")]
             recipients,
@@ -599,6 +639,7 @@ fn main() -> Result<()> {
             password: password.as_deref(),
             secrets,
             certs,
+            allow_expired: *allow_expired,
             pubkeys,
             #[cfg(feature = "ldap")]
             id_codes: recipients,
