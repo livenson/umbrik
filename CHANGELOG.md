@@ -13,14 +13,25 @@ Note that a change to the container wire format is breaking even when the API is
 
 - Initial implementation: CDOC2 container format in Rust
 - Python bindings, built for every supported interpreter and signed on publish
+- Refuse certificates outside their validity window (#10)
 
 ### Changed
 
 - Ignore Python bytecode caches
+- Versioning policy, release tooling, and a wider build matrix
 
 ### Dependencies
 
 - Update dependencies to latest compatible versions
+- Bump the rust-dependencies group across 1 directory with 2 updates (#1)
+
+### Documentation
+
+- Cut prose, keep facts
+- Record the branch protection now in place
+- Branch protection is enforced for administrators
+- Add AGENTS.md with the project's working rules (#6)
+- Fix the install instructions and have CI run them (#9)
 
 ### Security
 
