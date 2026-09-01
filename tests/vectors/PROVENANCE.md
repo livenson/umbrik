@@ -45,45 +45,25 @@ a vector produced by the implementation under test proves nothing.
 
 ## Known gap: `password.cdoc2` cannot be opened
 
-The password recorded in the upstream `test/generate_documents.sh`
-(`Kui-Arno-isaga-koolimajja-jõudis-olid-tunnid-juba-alanud`, label `kevade`) does **not** open
-the checked-in `password.cdoc2`. Verified independently in Python as well as in umbrik, so it is
-not an umbrik bug — the committed vector and the committed script have drifted apart, exactly as
-the symmetric vector's label did.
+The password in upstream's `test/generate_documents.sh` does not open the checked-in
+`password.cdoc2`; the vector and the script have drifted apart. Confirmed independently in
+Python, so it is not an umbrik bug. Unicode normalisation was ruled out — both are NFC.
 
-Consequences:
-
-- `password.cdoc2` is used only for **header structure** assertions (capsule type, iteration
-  count, the two distinct salts). It is never decrypted.
-- SC06 decryption is instead proven by the interop job, which encrypts with `cdoc2-cli` and
-  decrypts with umbrik using a password both sides know.
-
-Byte-comparing the password against the script ruled out Unicode normalisation: both are NFC,
-57 bytes, `C3 B5` for `õ`. Candidate passwords from the bats suite were also tried.
-
-If upstream republishes the vector with a known password, add a decryption test for it.
+The vector is therefore used only for header-structure assertions and never decrypted. SC06
+decryption is proven by the interop job instead.
 
 ## Known gap: `ec_simple.cdoc2` key has drifted
 
-`ec_simple.cdoc2` is addressed to a P-384 public key beginning `045476e48b6d1280…`, but the
-committed `keys/cdoc2client-certificate.pem` and `keys/cdoc2client_priv.key` — which agree with
-each other — both hold `0427541650c1ad89…`. The vector was produced with a key that is no longer
-in the repository, so it cannot be decrypted here.
+`ec_simple.cdoc2` is addressed to a P-384 key that is not the committed
+`keys/cdoc2client_priv.key`, so it cannot be decrypted here. It is used for structure assertions
+plus a canary test asserting the mismatch; if upstream republishes matching keys, that canary
+fails and should become a real decryption test.
 
-This is the **third** instance of the same upstream pattern, after `symmetric.cdoc2`'s label and
-`password.cdoc2`'s password: the committed vectors have drifted from the committed inputs. Treat
-any vector/key pairing in this directory as unverified until a test actually exercises it.
+Coverage is unaffected: SC01 on secp256r1 and SC02 are verified end to end against the committed
+keys, and SC01 on secp384r1 is covered by the interop job.
 
-Consequences:
-
-- `ec_simple.cdoc2` is used only for **structure** assertions, plus a canary test asserting the
-  mismatch. If upstream republishes matching keys, that canary fails and should be replaced with
-  a real decryption test.
-- SC01 on **secp256r1** *is* verified end to end: `ec_256_simple.cdoc2` decrypts with the
-  committed `keys/cdoc2client_256_priv.key`.
-- SC02 is verified end to end: `rsa_simple.cdoc2` decrypts with `keys/rsa_priv.pem`.
-- SC01 on **secp384r1** is covered by the interop job, which has `cdoc2-cli` encrypt to the
-  committed certificate and has umbrik decrypt the result.
+Treat any vector/key pairing here as unverified until a test exercises it — three have drifted
+so far.
 
 ## Private keys
 

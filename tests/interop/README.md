@@ -1,8 +1,8 @@
 # Interop testing
 
-The only test that can catch a wrong salt, a misaligned AAD range, or an HKDF backed by the
-wrong hash. Round-trip tests cannot: a constant applied consistently in both directions passes
-them. This is a CI gate, not a nice-to-have.
+The only test that catches a wrong salt, a misaligned AAD range, or an HKDF backed by the wrong
+hash — a constant applied consistently in both directions passes a round trip. A CI gate, not a
+nice-to-have.
 
 ## What it checks
 

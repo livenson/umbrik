@@ -38,6 +38,12 @@ updates:
     schedule:
       interval: monthly
     labels: ["dependencies", "ci"]
+    # Digest refreshes within a major version only. This image builds the CDOC2 reference
+    # implementation, so its JDK should track what that project supports rather than the newest
+    # release; a major bump would produce failures that look like umbrik regressions.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"

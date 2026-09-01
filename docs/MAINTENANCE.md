@@ -1,144 +1,96 @@
-# Keeping umbrik healthy
+# Maintenance
 
-What runs automatically, why it exists, and what still needs a person.
+## Why automation matters here
 
-## Why this needs more than usual
+Every dependency is pinned to an exact version, so nothing updates on its own. The automation
+below is what keeps those pins from going stale.
 
-umbrik pins every dependency to an exact version (`=x.y.z`). That is deliberate — a
-cryptographic library should not silently change the code that derives its keys — but it means
-nothing updates on its own, and a pinned version is a version that will eventually be
-vulnerable. That has already happened once: a routine `cargo deny` run found
-[CVE-2025-62518](https://rustsec.org/advisories/RUSTSEC-2025-0111) in the exact `tar` version
-this project had pinned.
-
-So the automation is not optional hygiene here. It is the thing that makes exact pinning safe.
-
-## What runs, and when
+## What runs
 
 | What | When | Catches |
 |---|---|---|
-| **CI** (`ci.yml`) | every push and PR | build, clippy, fmt, 110 tests, both feature configurations |
-| **Interop** | every push and PR | a wrong constant — the only check that can |
-| **cargo-deny** | every push and PR | vulnerable, yanked, or wrongly-licensed dependencies |
-| **Dependency review** | every PR | a *new* dependency that is vulnerable or wrongly licensed, before merge |
-| **CodeQL** | push, PR, weekly | cryptographic misuse, injection, unsafe handling of untrusted input |
-| **Dependabot** | weekly | outdated pins; security updates arrive separately and immediately |
-| **Scorecard** | weekly | the repository's own posture — branch protection, token scope, unpinned actions |
-| **Release** | on a `v*` tag | builds seven targets, generates an SBOM, signs everything |
+| CI | push, PR | build, clippy, fmt, tests, both feature configurations |
+| Interop | push, PR | a wrong cryptographic constant — the only check that can |
+| cargo-deny | push, PR | vulnerable, yanked, or wrongly-licensed dependencies |
+| Dependency review | PR | a new bad dependency, before merge |
+| CodeQL | push, PR, weekly | cryptographic misuse, injection, unsafe untrusted input |
+| Dependabot | weekly | stale pins; security updates arrive separately |
+| Scorecard | weekly | repository posture: branch protection, token scope, pinned actions |
+| Release | `v*` tag | seven targets, SBOM, signatures |
 
-### Dependabot
+## Dependabot
 
-Grouped so a routine week is one reviewable PR. Two deliberate choices:
+Minor and patch updates are grouped into one PR. Two deliberate exclusions:
 
-- **Security updates are never grouped with version updates** — that is Dependabot's own
-  behaviour, and it is the right one: an advisory should not arrive buried in a batch.
-- **Major bumps are ignored** and must be taken by hand. A major version of a cryptographic
-  crate can change key derivation or defaults, and the interop job is what has to decide whether
-  it is safe. Reviewing several at once hides which change broke what.
+- **Major bumps** are ignored and taken by hand. A major version of a cryptographic crate can
+  change key derivation; only the interop job can judge whether it is safe, and reviewing several
+  at once hides which change broke what.
+- **Major base-image bumps** in `tests/interop` are ignored. That image builds the CDOC2
+  reference implementation and should track the JDK that project supports.
 
 Known limitation: Dependabot has had
-[trouble with Cargo workspaces](https://github.com/dependabot/dependabot-core/issues/13833).
-If PRs stop arriving, check that issue before assuming everything is current — and note that
-`cargo deny` in CI still catches vulnerable versions either way.
+[trouble with Cargo workspaces](https://github.com/dependabot/dependabot-core/issues/13833). If
+PRs stop arriving, check there before assuming the pins are current; `cargo deny` catches
+vulnerable versions either way.
 
-### CodeQL
+## Actions are pinned by SHA
 
-Rust support became generally available in October 2025. It looks for a different class of
-problem than clippy: cryptographic misuse and unsafe handling of untrusted data, which is
-precisely umbrik's exposure — container bytes are attacker-controlled and parsed *before*
-anything is authenticated, because the header MAC key descends from the FMK.
+A tag is mutable, so pinning to one means running whatever it points at today. Every action is
+pinned to a commit SHA with the version in a trailing comment; Dependabot updates both.
 
-### Python wheels
+## flatc
 
-Wheels are built against PyO3's stable ABI (`abi3-py310`), which means **one wheel per platform**
-rather than one per interpreter version, and it keeps working on Python versions released after
-it was built. The `cp310-abi3` tag installs on 3.10 and everything later.
+`scripts/install-flatc.sh` installs the `flatc` matching the pinned `flatbuffers` crate, reading
+the version from `Cargo.toml`. The two must agree: a mismatch generates code that does not
+compile. Distribution packages lag and are not usable.
 
-`python.yml` does not take that on trust: it builds a single wheel and then installs and tests
-*that same wheel* on 3.10, 3.11, 3.12, 3.13 and 3.14. If abi3 ever stopped delivering what it
-promises, the matrix fails.
+## Python wheels
 
-Python 3.9 is deliberately excluded — it reached end of life in October 2025 and receives no
-security fixes, which is not a base a cryptographic library should invite.
+Built against the stable ABI (`abi3-py310`): one wheel per platform, working on 3.10 and every
+later version. `python.yml` installs that single wheel and runs the tests on 3.10 through 3.14,
+so the claim is verified rather than assumed. Python 3.9 is excluded — end of life since
+October 2025.
 
-### Publishing to PyPI
-
-Uses [Trusted Publishing](https://docs.pypi.org/trusted-publishers/), not an API token. The
-workflow presents a short-lived OIDC token, PyPI verifies it against a configured publisher and
-mints a token valid for fifteen minutes. There is no long-lived credential to store, leak or
-rotate — the failure mode that has caused most package-index compromises simply does not exist.
-
-Two further hardening steps, both applied:
-
-- The publish job runs in a **deployment environment** (`pypi`). PyPI binds the trusted publisher
-  to that environment name, so a workflow elsewhere in the repository cannot publish, and the
-  environment can require a reviewer before any release goes out.
-- `attestations: true` produces [PEP 740](https://peps.python.org/pep-0740/) attestations, so
-  provenance travels with the package on the index instead of living only in this repository.
-  GitHub artifact attestations are generated as well, covering the same artifacts from the other
-  side.
-
-### Which platforms the CLI is built for
-
-Seven targets, all built and signed by CI:
+## Platforms
 
 | Target | Features |
 |---|---|
-| `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` | full |
-| `x86_64-apple-darwin`, `aarch64-apple-darwin` | full |
+| `{x86_64,aarch64}-unknown-linux-gnu` | full |
+| `{x86_64,aarch64}-apple-darwin` | full |
 | `x86_64-pc-windows-msvc` | full |
-| `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` | no default features |
+| `{x86_64,aarch64}-unknown-linux-musl` | no default features |
 
-The musl builds are fully static and run anywhere, including scratch containers. They drop the
-eID directory lookup: that needs OpenSSL, because SK's LDAP server negotiates a TLS suite rustls
-will not offer, and linking OpenSSL statically against musl is a lot of trouble for one feature.
-The result is a binary incapable of any network access at all, which is the right default for a
-locked-down environment.
+musl builds are static and make no network connections: the eID directory lookup needs OpenSSL,
+because SK's LDAP negotiates a cipher suite rustls will not offer. Windows uses schannel and
+needs no OpenSSL. Every native target is smoke-tested before upload.
 
-Windows needs no OpenSSL — it uses schannel — but has no `flatc` package, so the workflow fetches
-the official binary, pinned to the version matching the `flatbuffers` crate.
+## Publishing
 
-Every native target is smoke-tested before upload. A binary that cannot start is worse than no
-binary.
+Wheels go to PyPI through [Trusted Publishing](https://docs.pypi.org/trusted-publishers/): a
+short-lived OIDC token is exchanged for one valid fifteen minutes, so there is no long-lived
+credential. The job runs in a `pypi` deployment environment that PyPI binds the publisher to, and
+emits [PEP 740](https://peps.python.org/pep-0740/) attestations alongside GitHub's.
 
-### Releases: SBOM and attestations
-
-Tagging `v*` builds every target, generates a CycloneDX SBOM from the resolved `Cargo.lock`, and
-signs both with [GitHub Artifact Attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds).
-
-Attestations bind each artifact's SHA-256 digest to the workflow, repository and commit that
-built it, signed through Sigstore with a short-lived certificate — there is no long-lived signing
-key to store or leak. Anyone can verify:
+Binaries and the CycloneDX SBOM are signed with GitHub Artifact Attestations, which bind each
+artifact to the workflow run that built it:
 
 ```bash
 gh attestation verify ./umbrik --repo livenson/umbrik
 ```
 
-For an unaudited cryptographic tool this matters more than usual: it lets someone confirm the
-binary they downloaded was built from the source they can read.
+## Settings not held in this repository
 
-## Repository settings a person has to turn on
+- [x] Private vulnerability reporting — `SECURITY.md` links to the advisory form
+- [x] Dependabot alerts and security updates
+- [x] Secret scanning with push protection
+- [ ] Branch protection on `main`, requiring CI and interop
+- [ ] A `pypi` deployment environment, ideally with a required reviewer
+- [ ] A PyPI trusted publisher for `livenson/umbrik`, workflow `python.yml`, environment `pypi`
 
-None of these can be set from a file in the repository:
+## Always manual
 
-- [ ] **Private vulnerability reporting** — Settings → Code security. `SECURITY.md` links
-      directly to the advisory form, so until this is on, that link 404s.
-- [ ] **Dependabot alerts and security updates** — Settings → Code security.
-- [ ] **Secret scanning with push protection** — free for public repositories.
-- [ ] **Branch protection on `main`** — require CI and interop to pass. Scorecard checks for
-      this, and without it the interop gate can be bypassed by pushing straight to `main`.
-- [ ] **A `pypi` deployment environment**, ideally with a required reviewer. The publish job
-      names it, and PyPI's trusted publisher should be bound to it.
-- [ ] **A PyPI trusted publisher** for `livenson/umbrik`, workflow `python.yml`, environment
-      `pypi`. Until this exists, publishing fails — by design, rather than falling back to a
-      token.
-
-## What is still manual, and always will be
-
-- **Interop failures after a dependency bump.** If `cdoc2-cli` stops reading umbrik's output,
-  something changed in the cryptography. No tool decides that for you.
-- **Bumping the pinned upstream commits** in `tests/interop/Dockerfile` and
-  `schema/PROVENANCE.md`. Deliberate, so that "upstream changed" is never mistaken for
-  "umbrik regressed".
-- **The accepted risk in `deny.toml`** (RUSTSEC-2023-0071, RSA timing). Revisit if a
+- **Interop failures after a dependency bump.** No tool decides whether the cryptography changed.
+- **Bumping pinned upstream commits** in `tests/interop/Dockerfile` and `schema/PROVENANCE.md`,
+  so "upstream changed" is never mistaken for "umbrik regressed".
+- **The accepted risk in `deny.toml`** (RUSTSEC-2023-0071, RSA timing), revisited if a
   constant-time implementation appears.

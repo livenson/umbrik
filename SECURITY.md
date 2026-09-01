@@ -55,22 +55,19 @@ Out of scope:
 
 ### RSA timing side channel (RUSTSEC-2023-0071, "Marvin Attack")
 
-The `rsa` crate umbrik uses for SC02 does not implement a fully constant-time private-key
-operation, and there is no fixed release to upgrade to.
+The `rsa` crate is not fully constant-time in its private-key operation, and there is no fixed
+release.
 
-**What is affected:** SC02 decryption using a *software* RSA private key.
+Affected: SC02 decryption with a *software* RSA key. Not affected: SC02 via a card or token,
+where RSA-OAEP runs inside the PKCS#11 module and the key never reaches the crate; SC01, SC05 and
+SC06, which do not use RSA; and encryption, which is a public-key operation.
 
-**What is not:** SC02 with a smart card or token — RSA-OAEP then runs inside the PKCS#11 module
-and the private key never reaches the crate, which is the path Estonian legacy RSA cards take.
-SC01, SC05 and SC06 do not use RSA at all, and encryption is a public-key operation.
+Exploiting it needs a decryption oracle — many attacker-chosen containers decrypted while each is
+precisely timed. Opening a file you were sent is not that. An automated service decrypting
+untrusted containers is, and should hold RSA keys in a token.
 
-**What an attack requires:** a decryption oracle — the ability to have many attacker-chosen
-containers decrypted while precisely timing each one. Decrypting a file you were sent does not
-put you in that position. An automated service that decrypts untrusted containers on demand
-does; such a service should hold RSA keys in a token rather than in software.
-
-This is recorded as an explicit, documented exception in `deny.toml` rather than suppressed, so
-it stays visible in CI. It will be revisited if a constant-time implementation appears.
+Recorded as an explicit exception in `deny.toml` rather than suppressed, so it stays visible in
+CI. Revisited if a constant-time implementation appears.
 
 ## Status
 
