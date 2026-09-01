@@ -17,3 +17,8 @@ Cargo.lock.orig
 
 # maturin build output
 /bindings/python/dist
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
