@@ -17,20 +17,20 @@ sha2 = "=0.10.9"
 sha1 = "=0.10.6"
 hmac = "=0.12.1"
 chacha20poly1305 = "=0.10.1"
-zeroize = { version = "=1.8.1", features = ["zeroize_derive"] }
+zeroize = { version = "=1.9.0", features = ["zeroize_derive"] }
 subtle = "=2.6.1"
 thiserror = "=2.0.20"
 rand_core = "=0.6.4"
 pbkdf2 = { version = "=0.12.2", default-features = false, features = ["hmac"] }
-tar = "=0.4.45"
-flate2 = "=1.1.2"
-clap = { version = "=4.5.51", features = ["derive"] }
-anyhow = "=1.0.103"
-rpassword = "=7.4.0"
+tar = "=0.4.46"
+flate2 = "=1.1.10"
+clap = { version = "=4.6.6", features = ["derive"] }
+anyhow = "=1.0.104"
+rpassword = "=7.5.4"
 rand = "=0.8.6"
 p384 = { version = "=0.13.1", default-features = false, features = ["ecdh", "pem", "std"] }
 p256 = { version = "=0.13.2", default-features = false, features = ["ecdh", "pem", "std"] }
-rsa = { version = "=0.9.8", features = ["sha2"] }
+rsa = { version = "=0.9.10", features = ["sha2"] }
 x509-cert = { version = "=0.2.5", features = ["pem"] }
 cryptoki = "=0.12.0"
 # native-tls, NOT rustls. esteid.ldap.sk.ee negotiates TLS 1.2 with AES256-GCM-SHA384, a static
