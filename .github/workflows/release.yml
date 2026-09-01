@@ -52,11 +52,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatbuffers-compiler libssl-dev pkg-config musl-tools
+          sudo apt-get install -y libssl-dev pkg-config musl-tools
+          scripts/install-flatc.sh
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install flatbuffers
+        run: scripts/install-flatc.sh
 
       # No flatc package on the Windows runners; the project publishes an official binary.
       # Pinned to the version matching the `flatbuffers` crate — a mismatch generates code that
@@ -120,7 +121,8 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatbuffers-compiler libssl-dev pkg-config
+          sudo apt-get install -y libssl-dev pkg-config
+          scripts/install-flatc.sh
 
       - uses: actions/download-artifact@v4
         with:

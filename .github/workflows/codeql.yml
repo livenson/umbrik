@@ -29,7 +29,8 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatbuffers-compiler libssl-dev pkg-config
+          sudo apt-get install -y libssl-dev pkg-config
+          scripts/install-flatc.sh
 
       - uses: github/codeql-action/init@v3
         with:
