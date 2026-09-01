@@ -43,7 +43,7 @@ jobs:
           - { os: ubuntu-latest,    target: x86_64-unknown-linux-musl,  features: none }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, features: none }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -100,7 +100,7 @@ jobs:
           "$BIN" --version
           "$BIN" encrypt --help > /dev/null
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: umbrik-${{ matrix.target }}
           path: dist/umbrik-${{ matrix.target }}*
@@ -115,7 +115,7 @@ jobs:
       id-token: write     # mint the OIDC token Sigstore signs against
       attestations: write # persist the attestations
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install build dependencies
@@ -124,7 +124,7 @@ jobs:
           sudo apt-get install -y libssl-dev pkg-config
           scripts/install-flatc.sh
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -142,12 +142,12 @@ jobs:
           python3 -c "import json,sys; d=json.load(open('dist/umbrik-sbom.json')); print(f\"SBOM: {len(d['components'])} components\")"
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "dist/umbrik-*"
 
       - name: Attest SBOM
-        uses: actions/attest-sbom@v2
+        uses: actions/attest-sbom@v4
         with:
           subject-path: "dist/umbrik-x86_64-unknown-linux-gnu"
           sbom-path: dist/umbrik-sbom.json
