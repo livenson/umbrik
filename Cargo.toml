@@ -1,6 +1,22 @@
 [workspace]
 resolver = "2"
-members = ["crates/umbrik-core", "crates/umbrik-ldap", "crates/umbrik-pkcs11", "crates/umbrik-cli"]
+members = [
+    "crates/umbrik-core",
+    "crates/umbrik-ldap",
+    "crates/umbrik-pkcs11",
+    "crates/umbrik-cli",
+    "bindings/python",
+]
+# The Python bindings are in the workspace so they share the lockfile and inherited metadata,
+# but out of the default set: building them requires a Python interpreter at or above the abi3
+# floor (3.10), and a plain `cargo build` for the CLI or library should not need Python at all.
+# Build them explicitly with `cargo build -p umbrik-python`, or through maturin.
+default-members = [
+    "crates/umbrik-core",
+    "crates/umbrik-ldap",
+    "crates/umbrik-pkcs11",
+    "crates/umbrik-cli",
+]
 
 [workspace.package]
 version = "0.0.1"
@@ -33,6 +49,9 @@ p256 = { version = "=0.13.2", default-features = false, features = ["ecdh", "pem
 rsa = { version = "=0.9.10", features = ["sha2"] }
 x509-cert = { version = "=0.2.5", features = ["pem"] }
 cryptoki = "=0.12.0"
+# abi3-py310: one wheel per platform covering every supported CPython (3.10 onward),
+# rather than a wheel per interpreter version. See bindings/python/README.md.
+pyo3 = { version = "=0.29.2", features = ["abi3-py310"] }
 # native-tls, NOT rustls. esteid.ldap.sk.ee negotiates TLS 1.2 with AES256-GCM-SHA384, a static
 # RSA key-exchange suite with no forward secrecy that rustls deliberately does not implement, so
 # a rustls build cannot connect to it at all — and that directory holds the ID-card certificates.

@@ -48,6 +48,36 @@ problem than clippy: cryptographic misuse and unsafe handling of untrusted data,
 precisely umbrik's exposure — container bytes are attacker-controlled and parsed *before*
 anything is authenticated, because the header MAC key descends from the FMK.
 
+### Python wheels
+
+Wheels are built against PyO3's stable ABI (`abi3-py310`), which means **one wheel per platform**
+rather than one per interpreter version, and it keeps working on Python versions released after
+it was built. The `cp310-abi3` tag installs on 3.10 and everything later.
+
+`python.yml` does not take that on trust: it builds a single wheel and then installs and tests
+*that same wheel* on 3.10, 3.11, 3.12, 3.13 and 3.14. If abi3 ever stopped delivering what it
+promises, the matrix fails.
+
+Python 3.9 is deliberately excluded — it reached end of life in October 2025 and receives no
+security fixes, which is not a base a cryptographic library should invite.
+
+### Publishing to PyPI
+
+Uses [Trusted Publishing](https://docs.pypi.org/trusted-publishers/), not an API token. The
+workflow presents a short-lived OIDC token, PyPI verifies it against a configured publisher and
+mints a token valid for fifteen minutes. There is no long-lived credential to store, leak or
+rotate — the failure mode that has caused most package-index compromises simply does not exist.
+
+Two further hardening steps, both applied:
+
+- The publish job runs in a **deployment environment** (`pypi`). PyPI binds the trusted publisher
+  to that environment name, so a workflow elsewhere in the repository cannot publish, and the
+  environment can require a reviewer before any release goes out.
+- `attestations: true` produces [PEP 740](https://peps.python.org/pep-0740/) attestations, so
+  provenance travels with the package on the index instead of living only in this repository.
+  GitHub artifact attestations are generated as well, covering the same artifacts from the other
+  side.
+
 ### Releases: SBOM and attestations
 
 Tagging `v*` builds four targets, generates a CycloneDX SBOM from the resolved `Cargo.lock`, and
@@ -74,6 +104,11 @@ None of these can be set from a file in the repository:
 - [ ] **Secret scanning with push protection** — free for public repositories.
 - [ ] **Branch protection on `main`** — require CI and interop to pass. Scorecard checks for
       this, and without it the interop gate can be bypassed by pushing straight to `main`.
+- [ ] **A `pypi` deployment environment**, ideally with a required reviewer. The publish job
+      names it, and PyPI's trusted publisher should be bound to it.
+- [ ] **A PyPI trusted publisher** for `livenson/umbrik`, workflow `python.yml`, environment
+      `pypi`. Until this exists, publishing fails — by design, rather than falling back to a
+      token.
 
 ## What is still manual, and always will be
 

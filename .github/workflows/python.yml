@@ -1,0 +1,156 @@
+name: Python
+
+# Builds, tests and publishes the Python wheels.
+#
+# Wheels use PyO3's stable ABI (abi3-py310), so there is one wheel per *platform*, not per
+# interpreter version, and it keeps working on Python versions released after it was built. The
+# test matrix below is what proves that claim rather than assuming it: a single wheel is
+# installed and exercised on every supported CPython.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  wheels:
+    name: Wheel ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    target: x86_64,  manylinux: auto }
+          - { os: ubuntu-24.04-arm, target: aarch64, manylinux: auto }
+          - { os: macos-latest,     target: aarch64, manylinux: "off" }
+          - { os: macos-13,         target: x86_64,  manylinux: "off" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install flatc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install flatbuffers
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          working-directory: bindings/python
+          args: --release --out dist
+          # umbrik generates its FlatBuffers codec at build time, and the manylinux image has
+          # no flatc package. Building it from source keeps the wheel manylinux-compliant,
+          # which a wheel built on the bare runner would not be. Pinned to the version matching
+          # the `flatbuffers` crate — a mismatch produces code that will not compile.
+          before-script-linux: |
+            set -eux
+            FLATC_VERSION=25.12.19
+            if command -v yum >/dev/null; then yum install -y cmake gcc-c++ make git; fi
+            git clone --depth 1 --branch "v${FLATC_VERSION}" \
+              https://github.com/google/flatbuffers.git /tmp/flatbuffers
+            cmake -S /tmp/flatbuffers -B /tmp/flatbuffers/build \
+              -DCMAKE_BUILD_TYPE=Release -DFLATBUFFERS_BUILD_TESTS=OFF
+            cmake --build /tmp/flatbuffers/build --target flatc -j"$(nproc)"
+            cp /tmp/flatbuffers/build/flatc /usr/local/bin/flatc
+            flatc --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.target }}
+          path: bindings/python/dist/*.whl
+          if-no-files-found: error
+
+  # The point of abi3: one wheel, every supported interpreter. Verified, not assumed.
+  test:
+    name: Test wheel on Python ${{ matrix.python }}
+    needs: wheels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every CPython still receiving upstream support. 3.9 reached end of life in
+        # October 2025 and is deliberately excluded.
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-ubuntu-latest-x86_64
+          path: dist
+
+      - name: Install the wheel and run the tests
+        run: |
+          python -m pip install --upgrade pip pytest
+          # The same cp310-abi3 wheel is installed on every version in the matrix.
+          python -m pip install dist/*.whl
+          python -c "import umbrik; print('umbrik', umbrik.__version__, 'on', __import__('sys').version)"
+          python -m pytest bindings/python/tests -q
+
+  sdist:
+    name: Source distribution
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          working-directory: bindings/python
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: bindings/python/dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [wheels, test, sdist]
+    runs-on: ubuntu-latest
+    # A deployment environment lets a required reviewer or branch restriction gate publishing,
+    # and PyPI binds the trusted publisher to this environment name. Without it, any workflow
+    # in the repository could publish.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/umbrik
+    permissions:
+      # The only permission needed. Trusted publishing exchanges a short-lived OIDC token for a
+      # 15-minute PyPI token, so there is no long-lived API token to store, leak or rotate.
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # GitHub artifact attestations, verifiable with:
+      #   gh attestation verify <wheel> --repo livenson/umbrik
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
+
+      # PyPI's own PEP 740 attestations are generated by this action when publishing through a
+      # trusted publisher, so the provenance travels with the package on the index rather than
+      # living only in this repository.
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          attestations: true
+          print-hash: true

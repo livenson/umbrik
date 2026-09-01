@@ -25,6 +25,13 @@ updates:
         update-types: ["version-update:semver-major"]
     labels: ["dependencies"]
 
+  # maturin and the Python packaging metadata.
+  - package-ecosystem: pip
+    directory: "/bindings/python"
+    schedule:
+      interval: weekly
+    labels: ["dependencies", "python"]
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:

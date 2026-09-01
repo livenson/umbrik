@@ -151,6 +151,25 @@ Two things to be aware of:
 Decryption with a physical ID-card (PKCS#11, PIN1) is not implemented yet; `-k` currently takes a
 software private key in PEM.
 
+### Python
+
+```bash
+pip install umbrik
+```
+
+```python
+import umbrik
+
+blob = umbrik.encrypt({"notes.txt": b"tere"}, password=("my-label", "hunter2"))
+files = umbrik.decrypt(blob, password="hunter2")     # -> {"notes.txt": b"tere"}
+
+for r in umbrik.recipients(blob):                    # needs no key
+    print(r.scheme, r.display)
+```
+
+One wheel per platform covers Python 3.10 and every later version, via the stable ABI. See
+[`bindings/python/README.md`](bindings/python/README.md).
+
 ### Library
 
 ```rust

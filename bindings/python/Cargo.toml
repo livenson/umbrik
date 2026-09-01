@@ -1,0 +1,25 @@
+[package]
+name = "umbrik-python"
+description = "Python bindings for umbrik, the CDOC2 encrypted container format"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "umbrik"
+crate-type = ["cdylib"]
+
+[features]
+# Off by default so `cargo build` and `cargo test` work across the workspace: with
+# `extension-module` enabled, Python's symbols are left undefined for the interpreter to
+# resolve at import time, which a normal link cannot do. maturin turns it on when it builds
+# the wheel.
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+umbrik-core = { path = "../../crates/umbrik-core", version = "0.0.1" }
+pyo3.workspace = true
+rand.workspace = true
