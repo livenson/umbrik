@@ -41,9 +41,6 @@ updates:
         patterns: ["*"]
     labels: ["dependencies", "ci"]
 
-  # The Rust toolchain itself, once rust-toolchain.toml exists.
-  - package-ecosystem: rust-toolchain
-    directory: "/"
-    schedule:
-      interval: monthly
-    labels: ["dependencies"]
+  # No rust-toolchain entry: this project has no rust-toolchain.toml, and Dependabot errors
+  # rather than skipping when the file it is pointed at does not exist. Add both together if a
+  # pinned toolchain is ever introduced.
