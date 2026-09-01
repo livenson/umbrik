@@ -56,6 +56,8 @@ git push origin main --follow-tags
 The script verifies, bumps every manifest, regenerates `CHANGELOG.md` and pauses for review
 before tagging. It refuses to tag unless the suite passes, interop included.
 
-It builds and signs nothing locally: pushing the tag is the trigger, because provenance binding
-an artifact to a workflow run is not something a laptop can produce. See
+It builds and signs nothing locally: pushing the tag is the trigger. CI then builds every target,
+creates the GitHub release with the changelog section as its notes, attaches the binaries,
+checksums and SBOM, and publishes the wheels to PyPI. Provenance binding an artifact to a
+workflow run is not something a laptop can produce. See
 [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md).

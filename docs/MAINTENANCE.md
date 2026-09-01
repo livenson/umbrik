@@ -71,8 +71,9 @@ short-lived OIDC token is exchanged for one valid fifteen minutes, so there is n
 credential. The job runs in a `pypi` deployment environment that PyPI binds the publisher to, and
 emits [PEP 740](https://peps.python.org/pep-0740/) attestations alongside GitHub's.
 
-Binaries and the CycloneDX SBOM are signed with GitHub Artifact Attestations, which bind each
-artifact to the workflow run that built it:
+Tagging `v*` creates a GitHub release whose notes are the matching `CHANGELOG.md` section, with
+the binaries, `SHA256SUMS` and the CycloneDX SBOM attached. Everything is signed with GitHub
+Artifact Attestations, which bind each artifact to the workflow run that built it:
 
 ```bash
 gh attestation verify ./umbrik --repo livenson/umbrik

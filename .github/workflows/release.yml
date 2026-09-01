@@ -152,8 +152,75 @@ jobs:
           subject-path: "dist/umbrik-x86_64-unknown-linux-gnu"
           sbom-path: dist/umbrik-sbom.json
 
-      - name: Publish release
+      # Checksums let someone verify a download without the GitHub CLI. Attestations are the
+      # stronger check, but they require tooling the recipient may not have.
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum umbrik-* > SHA256SUMS
+          cat SHA256SUMS
+
+      # The changelog section for this version becomes the release notes, so the notes and
+      # CHANGELOG.md cannot drift apart.
+      - name: Extract release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          python3 - "$GITHUB_REF_NAME" <<'PY' > release-notes.md
+          import re, sys
+          version = sys.argv[1].lstrip("v")
+          text = open("CHANGELOG.md").read()
+          match = re.search(
+              rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## |\Z)",
+              text, re.S | re.M)
+          print(match.group(1).strip() if match else f"Release {version}.")
+          PY
+          cat >> release-notes.md <<'EOF'
+
+          ---
+
+          ### Verifying
+
+          Every artifact is signed with GitHub Artifact Attestations, binding it to the workflow
+          run and commit that produced it:
+
+          ```bash
+          gh attestation verify ./umbrik-x86_64-unknown-linux-gnu --repo livenson/umbrik
+          ```
+
+          `SHA256SUMS` covers the same files. `umbrik-sbom.json` is a CycloneDX SBOM of the
+          resolved dependency graph.
+
+          Python wheels are published to [PyPI](https://pypi.org/p/umbrik) rather than attached
+          here.
+
+          ### Which binary
+
+          | File | Notes |
+          |---|---|
+          | `*-unknown-linux-gnu` | glibc, full features |
+          | `*-unknown-linux-musl` | static, no network features |
+          | `*-apple-darwin` | macOS |
+          | `*-pc-windows-msvc.exe` | Windows |
+
+          umbrik is unaudited and is not affiliated with RIA or Cybernetica.
+          EOF
+
+      - name: Create the GitHub release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+        run: |
+          # Pre-release versions (0.2.0-rc.1) are marked as such so they are not served as the
+          # latest release.
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md $prerelease
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "umbrik $GITHUB_REF_NAME" \
+              --notes-file release-notes.md \
+              --verify-tag $prerelease
+          fi
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
