@@ -184,6 +184,12 @@ specification and the MIT-licensed reference implementation
 ([`open-eid/cdoc2-java-ref-impl`](https://github.com/open-eid/cdoc2-java-ref-impl)) are the
 sources for umbrik's constants, schemas and test vectors.
 
+## Contributing
+
+[`AGENTS.md`](AGENTS.md) has the conventions for changing this repository — several exist because
+breaking them produced containers no other implementation could read. `CLAUDE.md` is a symlink to
+it.
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE). Security policy: [`SECURITY.md`](SECURITY.md), and
