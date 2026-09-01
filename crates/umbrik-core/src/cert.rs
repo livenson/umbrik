@@ -1,10 +1,21 @@
 //! X.509 certificate parsing, for encrypting to a recipient.
 //!
-//! Only the public key and enough identity to build a key label are extracted. umbrik does not
-//! validate certificate chains, expiry, or revocation: encrypting to a certificate is the
-//! caller's decision about who to trust, and silently accepting an expired certificate is a
-//! different failure from silently rejecting a valid one. Callers that need validation should
-//! do it before handing the certificate here.
+//! # What is and is not checked
+//!
+//! **Validity dates are checked** — see [`CertificateRecipient::validity`]. Encrypting to an
+//! expired certificate usually means encrypting to a card that has been replaced, producing a
+//! container the recipient cannot open. That is worth catching, and costs nothing: the dates are
+//! in the certificate already.
+//!
+//! **Chain and revocation are not.** Both need infrastructure umbrik deliberately does not carry:
+//! a trust store of eID root certificates that would have to be kept current, and an OCSP or CRL
+//! lookup on every encryption. More importantly, neither would add much where recipients
+//! actually come from. A certificate fetched with `-r` arrives over an authenticated TLS
+//! connection to the directory that issued it, and one passed with `-c` is a file the user chose.
+//! The case they would protect — a certificate from an untrusted third party — is better served
+//! by the user validating it themselves than by umbrik implying a guarantee it only partly makes.
+//!
+//! If you need chain validation, do it before calling here.
 
 use x509_cert::der::oid::ObjectIdentifier;
 use x509_cert::der::{Decode, DecodePem, Encode};
@@ -33,6 +44,8 @@ pub struct CertificateRecipient {
     /// `serialNumber` from the subject DN, without its `PNOEE-` prefix, when present. For
     /// Estonian eID certificates this is the isikukood.
     pub id_code: Option<String>,
+    /// The certificate's `notBefore`, as seconds since the Unix epoch.
+    pub not_before: Option<i64>,
     /// The certificate's `notAfter`, as seconds since the Unix epoch.
     ///
     /// Written into eID key labels as `server_exp`, which is how a viewer can show
@@ -94,17 +107,13 @@ fn from_certificate(cert: &Certificate, der: &[u8]) -> Result<CertificateRecipie
     let key = public_key_from_spki(&cert.tbs_certificate.subject_public_key_info)?;
     let subject = cert.tbs_certificate.subject.to_string();
     let sha1 = format!("{:x}", sha1::Sha1::digest(der));
-    let not_after = i64::try_from(
-        cert.tbs_certificate
-            .validity
-            .not_after
-            .to_unix_duration()
-            .as_secs(),
-    )
-    .ok();
+    let to_unix = |t: &x509_cert::time::Time| i64::try_from(t.to_unix_duration().as_secs()).ok();
+    let not_before = to_unix(&cert.tbs_certificate.validity.not_before);
+    let not_after = to_unix(&cert.tbs_certificate.validity.not_after);
 
     Ok(CertificateRecipient {
         can_establish_key: permits_key_establishment(cert),
+        not_before,
         common_name: extract_rdn(&subject, "CN"),
         not_after,
         id_code: extract_id_code(&subject),
@@ -112,6 +121,47 @@ fn from_certificate(cert: &Certificate, der: &[u8]) -> Result<CertificateRecipie
         subject,
         key,
     })
+}
+
+/// Where a certificate sits relative to its validity window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Validity {
+    Valid,
+    /// `notBefore` is in the future.
+    NotYetValid,
+    /// `notAfter` has passed.
+    Expired,
+    /// The certificate carries no usable dates, so nothing can be concluded.
+    Unknown,
+}
+
+impl CertificateRecipient {
+    /// Where this certificate sits relative to `now`, in seconds since the Unix epoch.
+    ///
+    /// Reports rather than decides: whether to refuse an expired certificate is the caller's
+    /// choice. An expired *authentication* certificate does not always mean the key is gone —
+    /// but it usually means the card has been replaced, and the container would be unopenable.
+    pub fn validity(&self, now_unix: i64) -> Validity {
+        match (self.not_before, self.not_after) {
+            (Some(before), _) if now_unix < before => Validity::NotYetValid,
+            (_, Some(after)) if now_unix > after => Validity::Expired,
+            (None, None) => Validity::Unknown,
+            _ => Validity::Valid,
+        }
+    }
+
+    /// Convenience wrapper around [`Self::validity`] using the system clock.
+    ///
+    /// Returns [`Validity::Unknown`] if the clock is before the Unix epoch, rather than
+    /// guessing.
+    pub fn validity_now(&self) -> Validity {
+        match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(d) => i64::try_from(d.as_secs())
+                .map(|now| self.validity(now))
+                .unwrap_or(Validity::Unknown),
+            Err(_) => Validity::Unknown,
+        }
+    }
 }
 
 /// OID of the `keyUsage` extension.

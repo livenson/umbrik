@@ -87,10 +87,21 @@ Omit the password value to be prompted rather than putting it in shell history.
 `-r <isikukood>` looks up the recipient's **authentication** certificate in the Estonian eID
 directory and encrypts to it. No card is needed to encrypt — only to decrypt.
 
-Two caveats. It is a query to a public directory, which discloses the intended recipient to that
-directory's operator; umbrik prints a line to stderr for each lookup rather than doing it
-silently. And umbrik does not validate certificate chains, expiry or revocation — if that is not
-acceptable, fetch the certificate yourself and pass it with `-c`.
+One caveat: it is a query to a public directory, which discloses the intended recipient to that
+directory's operator. umbrik prints a line to stderr for each lookup rather than doing it
+silently.
+
+### What umbrik checks about a certificate
+
+**Validity dates are checked.** A certificate outside its window is refused, because encrypting
+to one usually means encrypting to a card that has been replaced — the container would be
+unopenable. `--allow-expired` overrides it with a warning.
+
+**Chains and revocation are not checked.** Both need infrastructure umbrik deliberately avoids: a
+trust store of eID roots to keep current, and an OCSP or CRL lookup on every encryption. Neither
+adds much where recipients actually come from — `-r` fetches over an authenticated TLS connection
+to the directory that issued the certificate, and `-c` takes a file you chose. If you obtain a
+certificate from an untrusted source, validate it before passing it here.
 
 ### Recipient labels
 

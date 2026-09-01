@@ -65,6 +65,14 @@ Hardware lives in `umbrik-pkcs11`, network in `umbrik-ldap`.
 - **`ErrorCode` discriminants are frozen** across major versions; they cross the C ABI. Add at
   the end, never reorder.
 
+## Certificates
+
+Validity dates are checked and a certificate outside its window is refused unless
+`--allow-expired` is given. Chain and revocation checking are deliberately absent — they need a
+trust store and an OCSP/CRL lookup, and add little where recipients come from an authenticated
+directory or a file the user chose. Do not add a partial version that implies more than it
+delivers.
+
 ## Out of scope
 
 Do not implement without asking: **SC07** (key shares — 2.0 draft, needs an SK relying-party

@@ -284,3 +284,39 @@ fn sc01_key_label_is_not_cryptographically_binding() {
     .expect("label must not affect SC01 decryption");
     assert_eq!(out, files());
 }
+
+// ---------------------------------------------------------------------------
+// Certificate validity
+// ---------------------------------------------------------------------------
+
+/// The committed test certificate is currently valid, which the whole suite depends on.
+#[test]
+fn test_certificate_is_within_its_validity_window() {
+    let parsed = cert::from_pem(&key_pem("cdoc2client-certificate.pem")).unwrap();
+    assert_eq!(parsed.validity_now(), cert::Validity::Valid);
+}
+
+#[test]
+fn reports_a_certificate_that_has_expired() {
+    let parsed = cert::from_pem(&key_pem("cdoc2client-certificate.pem")).unwrap();
+    let after = parsed.not_after.expect("certificate carries notAfter");
+    assert_eq!(parsed.validity(after + 1), cert::Validity::Expired);
+    assert_eq!(parsed.validity(after), cert::Validity::Valid);
+}
+
+#[test]
+fn reports_a_certificate_that_is_not_yet_valid() {
+    let parsed = cert::from_pem(&key_pem("cdoc2client-certificate.pem")).unwrap();
+    let before = parsed.not_before.expect("certificate carries notBefore");
+    assert_eq!(parsed.validity(before - 1), cert::Validity::NotYetValid);
+    assert_eq!(parsed.validity(before), cert::Validity::Valid);
+}
+
+/// Validity reporting must not block parsing: an expired certificate still yields a usable key,
+/// so the caller can decide.
+#[test]
+fn an_expired_certificate_still_parses() {
+    let parsed = cert::from_pem(&key_pem("cdoc2client-certificate.pem")).unwrap();
+    assert!(matches!(parsed.key, PublicKeyRef::Ec(_)));
+    assert!(parsed.not_before.unwrap() < parsed.not_after.unwrap());
+}
