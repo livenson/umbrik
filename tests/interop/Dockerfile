@@ -2,7 +2,9 @@
 #
 # Both repositories are pinned to commits, not branches: an interop job that silently follows
 # upstream cannot distinguish "umbrik regressed" from "upstream changed".
-FROM maven:3.9-eclipse-temurin-21 AS build
+# Pinned by digest, like the repositories below: an interop job that silently follows a
+# moving base image cannot distinguish "umbrik regressed" from "the image changed".
+FROM maven:3.9-eclipse-temurin-21@sha256:8f6ac126f7810bb5549c4cd122d2bf0e9cda5bdeb0838aa928f09e779fd8bef8 AS build
 
 ARG OPENAPI_REPO=https://github.com/open-eid/cdoc2-openapi.git
 ARG OPENAPI_REF=6dc1694261214d0e9ccf30de93e942e8e6291568
@@ -42,7 +44,7 @@ RUN mvn -q -B -pl cdoc2-cli -am package \
       -Dcheckstyle.skip=true -Dspotbugs.skip=true \
  && cp cdoc2-cli/target/cdoc2-cli-*.jar /build/cdoc2-cli.jar
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:21-jre@sha256:7a65df4b22d2de92d4e04056e884f3b9122d70b21e2847fd66084278bd0ce037
 COPY --from=build /build/cdoc2-cli.jar /opt/cdoc2-cli.jar
 # Long filenames and Estonian characters must survive the round trip.
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8

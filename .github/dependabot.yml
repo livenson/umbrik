@@ -32,6 +32,13 @@ updates:
       interval: weekly
     labels: ["dependencies", "python"]
 
+  # Base images in the interop Dockerfile are pinned by digest; Dependabot updates the digests.
+  - package-ecosystem: docker
+    directory: "/tests/interop"
+    schedule:
+      interval: monthly
+    labels: ["dependencies", "ci"]
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
