@@ -264,6 +264,12 @@ impl Pkcs11KeyProvider {
         // real card rejects this, that wrapping is the first thing to try.
         let params = Ecdh1DeriveParams::new(EcKdf::null(), peer_point);
 
+        // CK_ULONG is `unsigned long`, which is 64-bit on Unix but **32-bit on Win64**, so
+        // `Ulong` converts from a different primitive per platform. Going through `c_ulong`
+        // rather than a fixed-width integer keeps this compiling everywhere.
+        let value_len = std::os::raw::c_ulong::try_from(secret_len)
+            .map_err(|_| Error::Internal("ECDH secret length does not fit CK_ULONG"))?;
+
         // CARD-SPECIFIC: the derive template.
         //
         // `CKA_VALUE_LEN` is required by some tokens and rejected by others, and a card may
@@ -272,7 +278,7 @@ impl Pkcs11KeyProvider {
         let template = vec![
             Attribute::Class(ObjectClass::SECRET_KEY),
             Attribute::KeyType(KeyType::GENERIC_SECRET),
-            Attribute::ValueLen((secret_len as u64).into()),
+            Attribute::ValueLen(value_len.into()),
             Attribute::Sensitive(false),
             Attribute::Extractable(true),
             Attribute::Token(false),
