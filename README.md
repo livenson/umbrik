@@ -257,6 +257,12 @@ specification and the MIT-licensed reference implementation
 ([`open-eid/cdoc2-java-ref-impl`](https://github.com/open-eid/cdoc2-java-ref-impl)) are the
 sources for umbrik's constants, schemas, and test vectors.
 
+## Versioning
+
+Semantic versioning, shared across the crates, the CLI and the PyPI package. The CDOC2
+specification version is tracked separately from the software version, and the container wire
+format is treated as part of the public API. See [`VERSIONING.md`](VERSIONING.md).
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE). Security policy: [`SECURITY.md`](SECURITY.md).

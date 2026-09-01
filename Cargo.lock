@@ -1687,7 +1687,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "umbrik-cli"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1702,7 +1702,7 @@ dependencies = [
 
 [[package]]
 name = "umbrik-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "base64",
  "chacha20poly1305",
@@ -1727,7 +1727,7 @@ dependencies = [
 
 [[package]]
 name = "umbrik-ldap"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "ldap3",
  "umbrik-core",
@@ -1735,7 +1735,7 @@ dependencies = [
 
 [[package]]
 name = "umbrik-pkcs11"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "cryptoki",
  "rand_core",
@@ -1745,7 +1745,7 @@ dependencies = [
 
 [[package]]
 name = "umbrik-python"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "pyo3",
  "rand",

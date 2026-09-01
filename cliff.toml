@@ -1,0 +1,74 @@
+# git-cliff configuration.
+#
+# The changelog is generated from commit messages, so the messages are the source of truth.
+# Conventional Commits (`feat:`, `fix:`, …) are the convention going forward; the parsers below
+# also classify the pre-convention history rather than dumping it into "Other".
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to umbrik are recorded here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
+adheres to [Semantic Versioning](https://semver.org/) — see [`VERSIONING.md`](VERSIONING.md).
+Note that a change to the container wire format is breaking even when the API is untouched.
+
+"""
+
+body = """
+{% if version -%}
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+## Unreleased
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | upper_first }}\
+{% if commit.remote.pr_number %} (#{{ commit.remote.pr_number }}){% endif %}
+{%- endfor %}
+{% endfor %}
+"""
+
+footer = """
+"""
+trim = true
+
+[git]
+conventional_commits = true
+# Keep non-conventional commits: the early history predates the convention, and dropping it
+# would leave the first release with an empty changelog.
+filter_unconventional = false
+split_commits = false
+protect_breaking_commits = true
+
+commit_parsers = [
+  # Conventional Commits.
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^perf", group = "Changed" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^test", group = "Testing" },
+  { message = "^ci|^build", group = "Build and CI" },
+  { message = "^chore\\(deps\\)|^deps", group = "Dependencies" },
+  { message = "^chore|^style", skip = true },
+
+  # Security first: an advisory or a hardening change should never be buried under "Changed".
+  { message = "(?i)(vulnerab|advisory|CVE-|RUSTSEC|security)", group = "Security" },
+
+  # Pre-convention history, classified by what the messages actually say.
+  { message = "(?i)^initial implementation", group = "Added" },
+  { message = "(?i)^(add|adds|added|implement)", group = "Added" },
+  { message = "(?i)^(python bindings|automate maintenance)", group = "Added" },
+  { message = "(?i)^(update|updates|updated|bump) dependencies", group = "Dependencies" },
+  { message = "(?i)^(fix|fixes|fixed|correct)", group = "Fixed" },
+  { message = "(?i)^(ignore|remove|drop)", group = "Changed" },
+  { message = ".*", group = "Changed" },
+]
+
+filter_commits = false
+tag_pattern = "v[0-9].*"
+topo_order = false
+sort_commits = "oldest"

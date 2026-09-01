@@ -27,10 +27,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
-          - { os: macos-latest,   target: aarch64-apple-darwin }
-          - { os: macos-13,       target: x86_64-apple-darwin }
+          # glibc and macOS builds carry the full feature set, including the eID directory
+          # lookup, which needs OpenSSL for a TLS suite rustls will not offer.
+          - { os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,   features: default }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu,  features: default }
+          - { os: macos-latest,     target: aarch64-apple-darwin,       features: default }
+          - { os: macos-13,         target: x86_64-apple-darwin,        features: default }
+          # Windows uses schannel for TLS, so no OpenSSL is needed.
+          - { os: windows-latest,   target: x86_64-pc-windows-msvc,     features: default }
+          # musl builds are fully static and run anywhere, including scratch containers, at the
+          # cost of the directory lookup: linking OpenSSL statically against musl is a great
+          # deal of trouble for one feature. `--no-default-features` also makes these binaries
+          # incapable of any network access, which is the right default for an air-gapped or
+          # locked-down environment.
+          - { os: ubuntu-latest,    target: x86_64-unknown-linux-musl,  features: none }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, features: none }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -41,23 +52,57 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatbuffers-compiler libssl-dev pkg-config
+          sudo apt-get install -y flatbuffers-compiler libssl-dev pkg-config musl-tools
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install flatbuffers
 
-      - run: cargo build --release --target ${{ matrix.target }} -p umbrik-cli
+      # No flatc package on the Windows runners; the project publishes an official binary.
+      # Pinned to the version matching the `flatbuffers` crate — a mismatch generates code that
+      # will not compile.
+      - name: Install build dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = "25.12.19"
+          Invoke-WebRequest -Uri "https://github.com/google/flatbuffers/releases/download/v$version/Windows.flatc.binary.zip" -OutFile flatc.zip
+          Expand-Archive flatc.zip -DestinationPath "$env:RUNNER_TEMP\flatc"
+          "$env:RUNNER_TEMP\flatc" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Build
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "none" ]; then
+            cargo build --release --target ${{ matrix.target }} -p umbrik-cli --no-default-features
+          else
+            cargo build --release --target ${{ matrix.target }} -p umbrik-cli
+          fi
 
       - name: Stage artifact
+        shell: bash
         run: |
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/umbrik" "dist/umbrik-${{ matrix.target }}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/umbrik.exe" "dist/umbrik-${{ matrix.target }}.exe"
+          else
+            cp "target/${{ matrix.target }}/release/umbrik" "dist/umbrik-${{ matrix.target }}"
+          fi
+
+      # A binary that cannot run is worse than no binary. Native targets are smoke-tested here;
+      # cross-built ones cannot be, and are covered by the test suite on their own architecture.
+      - name: Smoke test
+        shell: bash
+        run: |
+          BIN="dist/umbrik-${{ matrix.target }}"
+          [ "${{ runner.os }}" = "Windows" ] && BIN="$BIN.exe"
+          "$BIN" --version
+          "$BIN" encrypt --help > /dev/null
 
       - uses: actions/upload-artifact@v4
         with:
           name: umbrik-${{ matrix.target }}
-          path: dist/umbrik-${{ matrix.target }}
+          path: dist/umbrik-${{ matrix.target }}*
           if-no-files-found: error
 
   attest:

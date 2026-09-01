@@ -24,7 +24,7 @@ So the automation is not optional hygiene here. It is the thing that makes exact
 | **CodeQL** | push, PR, weekly | cryptographic misuse, injection, unsafe handling of untrusted input |
 | **Dependabot** | weekly | outdated pins; security updates arrive separately and immediately |
 | **Scorecard** | weekly | the repository's own posture — branch protection, token scope, unpinned actions |
-| **Release** | on a `v*` tag | builds four targets, generates an SBOM, signs everything |
+| **Release** | on a `v*` tag | builds seven targets, generates an SBOM, signs everything |
 
 ### Dependabot
 
@@ -78,9 +78,32 @@ Two further hardening steps, both applied:
   GitHub artifact attestations are generated as well, covering the same artifacts from the other
   side.
 
+### Which platforms the CLI is built for
+
+Seven targets, all built and signed by CI:
+
+| Target | Features |
+|---|---|
+| `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` | full |
+| `x86_64-apple-darwin`, `aarch64-apple-darwin` | full |
+| `x86_64-pc-windows-msvc` | full |
+| `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` | no default features |
+
+The musl builds are fully static and run anywhere, including scratch containers. They drop the
+eID directory lookup: that needs OpenSSL, because SK's LDAP server negotiates a TLS suite rustls
+will not offer, and linking OpenSSL statically against musl is a lot of trouble for one feature.
+The result is a binary incapable of any network access at all, which is the right default for a
+locked-down environment.
+
+Windows needs no OpenSSL — it uses schannel — but has no `flatc` package, so the workflow fetches
+the official binary, pinned to the version matching the `flatbuffers` crate.
+
+Every native target is smoke-tested before upload. A binary that cannot start is worse than no
+binary.
+
 ### Releases: SBOM and attestations
 
-Tagging `v*` builds four targets, generates a CycloneDX SBOM from the resolved `Cargo.lock`, and
+Tagging `v*` builds every target, generates a CycloneDX SBOM from the resolved `Cargo.lock`, and
 signs both with [GitHub Artifact Attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds).
 
 Attestations bind each artifact's SHA-256 digest to the workflow, repository and commit that
