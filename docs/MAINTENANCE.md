@@ -66,10 +66,18 @@ needs no OpenSSL. Every native target is smoke-tested before upload.
 
 ## Publishing
 
-Wheels go to PyPI through [Trusted Publishing](https://docs.pypi.org/trusted-publishers/): a
-short-lived OIDC token is exchanged for one valid fifteen minutes, so there is no long-lived
-credential. The job runs in a `pypi` deployment environment that PyPI binds the publisher to, and
-emits [PEP 740](https://peps.python.org/pep-0740/) attestations alongside GitHub's.
+Tagging attaches everything to the GitHub release: CLI binaries for seven targets, Python wheels
+and the sdist, `SHA256SUMS`, and the CycloneDX SBOM.
+
+PyPI publishing is **off**. Setting the repository variable `PUBLISH_TO_PYPI` to `true` enables
+it, once a trusted publisher exists for `livenson/umbrik` / `python.yml` / environment `pypi`.
+That path uses [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) — a short-lived
+OIDC token exchanged for one valid fifteen minutes, so no long-lived credential — and emits
+[PEP 740](https://peps.python.org/pep-0740/) attestations. Until then wheels are installable from
+the release page.
+
+`scripts/build-local.sh` builds the CLI and a wheel for the host platform only. Those are
+unsigned: an attestation binds an artifact to a workflow run, which a laptop cannot produce.
 
 Tagging `v*` creates a GitHub release whose notes are the matching `CHANGELOG.md` section, with
 the binaries, `SHA256SUMS` and the CycloneDX SBOM attached. Everything is signed with GitHub
@@ -86,8 +94,9 @@ gh attestation verify ./umbrik --repo livenson/umbrik
 - [x] Secret scanning with push protection
 - [x] Branch protection on `main`: build, interop, licences and CodeQL must pass; no force
       pushes or deletions; enforced for administrators too
-- [ ] A `pypi` deployment environment, ideally with a required reviewer
-- [ ] A PyPI trusted publisher for `livenson/umbrik`, workflow `python.yml`, environment `pypi`
+- [ ] *(only to publish to PyPI)* a `pypi` deployment environment, a trusted publisher for
+      `livenson/umbrik` / `python.yml` / `pypi`, and the repository variable `PUBLISH_TO_PYPI`
+      set to `true`
 
 ## Changes go through pull requests
 
