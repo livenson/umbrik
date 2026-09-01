@@ -48,16 +48,21 @@ changelog is generated from them. Earlier history is classified by pattern in `c
 
 ## Cutting a release
 
+Two phases, because `main` is protected and takes no direct pushes:
+
 ```bash
-scripts/release.sh 0.2.0
-git push origin main --follow-tags
+scripts/release.sh 0.2.0          # verify, bump, changelog, open a PR
+# ... merge it once green ...
+git switch main && git pull
+scripts/release.sh --tag 0.2.0    # tag the merged commit, push the tag
 ```
 
-The script verifies, bumps every manifest, regenerates `CHANGELOG.md` and pauses for review
-before tagging. It refuses to tag unless the suite passes, interop included.
+Phase one refuses to proceed unless the whole suite passes, interop included, and pauses for you
+to read the generated changelog. Phase two refuses to tag unless `main` is level with the remote
+and actually carries the version being tagged.
 
-It builds and signs nothing locally: pushing the tag is the trigger. CI then builds every target,
-creates the GitHub release with the changelog section as its notes, attaches the binaries,
-checksums and SBOM, and publishes the wheels to PyPI. Provenance binding an artifact to a
-workflow run is not something a laptop can produce. See
+Branch protection does not apply to tags, so the second phase pushes directly. Tagging is the
+trigger: CI builds every target, creates the GitHub release with the changelog section as its
+notes, and attaches the binaries, wheels, checksums and SBOM. Nothing is signed locally —
+provenance binding an artifact to a workflow run is not something a laptop can produce. See
 [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md).

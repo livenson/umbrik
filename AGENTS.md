@@ -119,6 +119,9 @@ git push -u origin fix-something
 gh pr create --fill
 ```
 
+Releases are two-phase for the same reason: `scripts/release.sh <version>` opens a PR with the
+bump and changelog, and `scripts/release.sh --tag <version>` tags it once merged.
+
 See [`VERSIONING.md`](VERSIONING.md) for what a version bump means — note that a change to the
 container bytes is breaking even when no signature changes — and
 [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md) for what runs automatically.
