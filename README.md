@@ -31,16 +31,32 @@ both directions with DigiDoc4.
 
 ## Install
 
-```bash
-brew install flatbuffers                               # macOS
-apt install flatbuffers-compiler libssl-dev pkg-config  # Debian/Ubuntu
+Debian/Ubuntu:
 
+<!-- ci:install-linux -->
+```bash
+sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+scripts/install-flatc.sh
 cargo build --release        # binary at target/release/umbrik
 ```
 
-`flatc` must match the `flatbuffers` version pinned in `Cargo.toml`; `scripts/install-flatc.sh`
-fetches the right one. OpenSSL is needed only for the eID directory lookup — build with
-`--no-default-features` for a binary with no network access at all.
+macOS:
+
+```bash
+brew install openssl@3 pkg-config
+scripts/install-flatc.sh
+cargo build --release
+```
+
+**Do not install `flatc` from your distribution.** umbrik generates its FlatBuffers codec at
+build time, and the compiler must match the `flatbuffers` version pinned in `Cargo.toml`; the
+packaged one lags and produces code that will not compile. `scripts/install-flatc.sh` reads the
+required version from `Cargo.toml` and fetches it.
+
+OpenSSL is needed only for the eID directory lookup. `cargo build --release --no-default-features`
+gives a binary that needs neither OpenSSL nor any network access.
+
+The Linux block above is executed verbatim by CI on a clean runner, so these steps cannot rot.
 
 ## Use
 
