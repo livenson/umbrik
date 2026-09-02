@@ -7,7 +7,6 @@
 //! unwrapping, CEK/HHK derivation, the payload AEAD — is shared and lives in [`crate::keys`].
 
 pub mod sc01;
-pub mod sc02;
 pub mod sc05;
 pub mod sc06;
 

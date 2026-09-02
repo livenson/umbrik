@@ -11,7 +11,7 @@
 //! because P-384 conventionally pairs with SHA-384.
 
 use hkdf::Hkdf;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
@@ -160,7 +160,7 @@ impl VerifiedHeader {
     /// The MAC covers the FlatBuffers header bytes only — not the prelude, version byte, or
     /// header-length field. Comparison is constant time.
     pub fn verify(envelope: &Envelope<'_>, header: Header, hhk: &Hhk) -> Result<VerifiedHeader> {
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(hhk.as_bytes())
+        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(hhk.as_bytes())
             .map_err(|_| Error::KeyDerivation("HHK length"))?;
         mac.update(envelope.header_bytes());
         let calculated = mac.finalize().into_bytes();

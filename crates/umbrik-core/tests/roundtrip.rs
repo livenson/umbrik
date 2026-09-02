@@ -1,6 +1,6 @@
 //! M2: SC05 and SC06 encrypt/decrypt, golden-file determinism, and fail-closed behaviour.
 
-use rand_core::{CryptoRng, Error as RngError, RngCore};
+use rand_core::{TryCryptoRng, TryRng};
 use std::path::PathBuf;
 use umbrik_core::container::{self, DecryptionKey, Recipient};
 use umbrik_core::error::ErrorCode;
@@ -20,33 +20,44 @@ impl FixedRng {
     }
 }
 
-impl RngCore for FixedRng {
-    fn next_u32(&mut self) -> u32 {
-        (self.next_u64() >> 32) as u32
-    }
-    fn next_u64(&mut self) -> u64 {
-        // SplitMix64.
+impl FixedRng {
+    /// SplitMix64. Kept byte-for-byte identical across the rand_core 0.10 migration: the golden
+    /// file pins umbrik's output under this exact stream, so a change here would look like a
+    /// change in the container format.
+    fn step(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         z ^ (z >> 31)
     }
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        for chunk in dest.chunks_mut(8) {
-            let bytes = self.next_u64().to_le_bytes();
+}
+
+// rand_core 0.10 moved the implementation point to `TryRng`; `Rng` and `CryptoRng` follow from
+// blanket impls once the error type is `Infallible`.
+impl TryRng for FixedRng {
+    type Error = core::convert::Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        Ok((self.step() >> 32) as u32)
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        Ok(self.step())
+    }
+
+    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+        for chunk in dst.chunks_mut(8) {
+            let bytes = self.step().to_le_bytes();
             for (slot, byte) in chunk.iter_mut().zip(bytes.iter()) {
                 *slot = *byte;
             }
         }
-    }
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), RngError> {
-        self.fill_bytes(dest);
         Ok(())
     }
 }
 
-impl CryptoRng for FixedRng {}
+impl TryCryptoRng for FixedRng {}
 
 const SECRET: &[u8; 32] = b"0123456789abcdef0123456789abcdef";
 const PASSWORD: &str = "correct-horse-battery-staple-õäöü";

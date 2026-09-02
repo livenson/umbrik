@@ -94,7 +94,7 @@ fn sc01_round_trip_through_the_token() {
     let mut sealed = Vec::new();
     container::encrypt(
         &mut sealed,
-        &mut rand_core::OsRng,
+        &mut rand::rng(),
         &files(),
         &[Recipient::PublicKey {
             label: identity.label.clone(),
@@ -124,7 +124,7 @@ fn container_for_another_recipient_does_not_match() {
     let mut sealed = Vec::new();
     container::encrypt(
         &mut sealed,
-        &mut rand_core::OsRng,
+        &mut rand::rng(),
         &files(),
         &[Recipient::Password {
             label: "someone-else".to_string(),
@@ -162,7 +162,7 @@ fn wrong_pin_is_reported_as_a_provider_error() {
     let mut sealed = Vec::new();
     container::encrypt(
         &mut sealed,
-        &mut rand_core::OsRng,
+        &mut rand::rng(),
         &files(),
         &[Recipient::PublicKey {
             label: identity.label.clone(),

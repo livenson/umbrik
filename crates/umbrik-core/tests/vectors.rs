@@ -133,6 +133,8 @@ fn decodes_sc01_ecc_capsule() {
     }
 }
 
+/// SC02 is unsupported, but its capsule must still decode — a container using it should report
+/// an unsupported scheme, not a malformed header.
 #[test]
 fn decodes_sc02_rsa_capsule() {
     let buf = vector("rsa_simple.cdoc2");

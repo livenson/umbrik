@@ -51,24 +51,6 @@ Out of scope:
 - Anything requiring an attacker who already controls the machine or the user's private keys.
 - Missing hardening in the deferred milestones (capsule server, SC07) that are not implemented.
 
-## Known accepted risks
-
-### RSA timing side channel (RUSTSEC-2023-0071, "Marvin Attack")
-
-The `rsa` crate is not fully constant-time in its private-key operation, and there is no fixed
-release.
-
-Affected: SC02 decryption with a *software* RSA key. Not affected: SC02 via a card or token,
-where RSA-OAEP runs inside the PKCS#11 module and the key never reaches the crate; SC01, SC05 and
-SC06, which do not use RSA; and encryption, which is a public-key operation.
-
-Exploiting it needs a decryption oracle — many attacker-chosen containers decrypted while each is
-precisely timed. Opening a file you were sent is not that. An automated service decrypting
-untrusted containers is, and should hold RSA keys in a token.
-
-Recorded as an explicit exception in `deny.toml` rather than suppressed, so it stays visible in
-CI. Revisited if a constant-time implementation appears.
-
 ## Status
 
 **umbrik has not been independently audited.** It is an independent implementation of a

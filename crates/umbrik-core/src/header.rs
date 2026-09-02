@@ -211,7 +211,8 @@ pub enum Capsule {
         recipient_public_key: Vec<u8>,
         sender_public_key: Vec<u8>,
     },
-    /// SC02 — RSA-OAEP.
+    /// SC02 — RSA-OAEP, for pre-2018 RSA cards. Parsed so such a container reports a clear
+    /// unsupported-scheme error, but not implemented: see `docs/CRYPTO-CONSTANTS.md`.
     RsaPublicKey {
         recipient_public_key: Vec<u8>,
         encrypted_kek: Vec<u8>,
@@ -444,26 +445,9 @@ impl Header {
                         c.as_union_value(),
                     )
                 }
-                Capsule::RsaPublicKey {
-                    recipient_public_key,
-                    encrypted_kek,
-                } => {
-                    let recipient = b.create_vector(recipient_public_key);
-                    let kek = b.create_vector(encrypted_kek);
-                    let c = fbs_recipients::RSAPublicKeyCapsule::create(
-                        &mut b,
-                        &fbs_recipients::RSAPublicKeyCapsuleArgs {
-                            recipient_public_key: Some(recipient),
-                            encrypted_kek: Some(kek),
-                        },
-                    );
-                    (
-                        fbs_header::Capsule::recipients_RSAPublicKeyCapsule,
-                        c.as_union_value(),
-                    )
-                }
                 other => {
                     return Err(Error::UnsupportedCapsule(match other {
+                        Capsule::RsaPublicKey { .. } => "SC02 RSA is not supported",
                         Capsule::KeyServer => "SC03/SC04 capsule-server schemes are deferred",
                         Capsule::KeyShares => "SC07 key-shares scheme is out of scope",
                         _ => "unsupported capsule",

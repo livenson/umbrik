@@ -30,12 +30,6 @@ pub struct EcPublicKey {
 #[non_exhaustive]
 pub enum PublicKeyRef {
     Ec(EcPublicKey),
-    /// PKCS#1 `RSAPublicKey` DER (RFC 8017 A.1.1) — **not** SPKI. This is what
-    /// `RSAPublicKeyCapsule.recipient_public_key` holds, so matching is a byte comparison
-    /// against that encoding.
-    Rsa {
-        pkcs1_der: Vec<u8>,
-    },
 }
 
 /// A key the provider can operate with.
@@ -65,13 +59,6 @@ impl Identity {
                     ..
                 },
             ) => mine.curve == *curve && mine.tls_point == *recipient_public_key,
-            (
-                PublicKeyRef::Rsa { pkcs1_der },
-                Capsule::RsaPublicKey {
-                    recipient_public_key,
-                    ..
-                },
-            ) => pkcs1_der == recipient_public_key,
             _ => false,
         }
     }
@@ -84,15 +71,9 @@ impl Identity {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum KeyOp<'a> {
-    /// SC01 and SC03. Returns the raw ECDH shared secret — the X coordinate, 48 bytes for
-    /// secp384r1. No KDF is applied by the provider.
+    /// SC01. Returns the raw ECDH shared secret — the X coordinate, 48 bytes for secp384r1.
+    /// No KDF is applied by the provider.
     Ecdh { peer: &'a EcPublicKey },
-    /// SC02 and SC04. Returns the decrypted KEK.
-    ///
-    /// OAEP parameters are fixed by the format: SHA-256 digest, **SHA-256 MGF1**, empty label.
-    /// Providers that expose an OAEP knob must pin all three; defaulting MGF1 to SHA-1 is the
-    /// classic interop failure here.
-    RsaOaep { ciphertext: &'a [u8] },
 }
 
 /// A source of private-key operations: a PKCS#11 token, a software key, a remote signer.

@@ -159,7 +159,11 @@ itself (`recipients.fbs`, `EccKeyDetails.recipient_public_key` comment). 97 byte
 The ECDH shared secret is the raw X coordinate (48 bytes), the standard ECDH primitive output —
 no KDF, no cofactor variant.
 
-## 6b. SC02 — RSA-OAEP KEK transport
+## 6b. SC02 — RSA-OAEP KEK transport (not implemented)
+
+> umbrik does not implement SC02; pre-2018 RSA cards are out of scope. The constants are
+> kept here because they were researched and validated, and because anyone adding SC02
+> back would need them.
 
 SC02 is the one scheme with **no HKDF at all**. The KEK is not derived; it is generated at
 random by the sender and transported directly inside the capsule:

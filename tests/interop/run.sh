@@ -51,7 +51,8 @@ KEYS="$REPO_ROOT/tests/vectors/keys"
 mkdir -p "$WORK/keys"
 cp "$KEYS"/cdoc2client-certificate.pem "$KEYS"/cdoc2client_priv.key \
    "$KEYS"/rsa_priv.pem "$WORK/keys/"
-# cdoc2-cli encrypts to a certificate; derive the RSA one from the private key.
+# cdoc2-cli encrypts to a public key; derive the RSA one to build an SC02 container umbrik
+# should refuse.
 openssl rsa -in "$KEYS/rsa_priv.pem" -pubout -out "$WORK/keys/rsa_pub.pem" 2>/dev/null
 
 mkdir -p "$WORK/src"
@@ -179,31 +180,28 @@ else
   bad "SC01 (secp384r1): cdoc2-cli failed to create a container"
 fi
 
-"$UMBRIK" encrypt -f "$WORK/u_sc02.cdoc2" \
-  --pubkey "rsa-recipient:$WORK/keys/rsa_pub.pem" \
-  "$WORK"/src/* >/dev/null
-mkdir -p "$WORK/out_u_sc02"
-if cdoc2 decrypt -f /work/u_sc02.cdoc2 \
-      -k /work/keys/rsa_priv.pem \
-      -o /work/out_u_sc02 >/dev/null 2>&1; then
-  compare "$WORK/out_u_sc02" "SC02 (RSA-OAEP): umbrik container read by cdoc2-cli"
-else
-  bad "SC02 (RSA-OAEP): cdoc2-cli could not decrypt umbrik's container"
-fi
-
+# SC02 is not supported: pre-2018 RSA cards are out of scope. A container using it must be
+# refused with an unsupported-scheme error rather than a parse failure — a user has to be able to
+# tell "umbrik cannot do this" from "this file is corrupt".
 if cdoc2 create -f /work/j_sc02.cdoc2 \
       -p /work/keys/rsa_pub.pem \
-      /work/src/hello.txt /work/src/notes.md /work/src/random.bin >/dev/null 2>&1; then
-  mkdir -p "$WORK/out_j_sc02"
-  if "$UMBRIK" decrypt -f "$WORK/j_sc02.cdoc2" \
-        -k "$WORK/keys/rsa_priv.pem" \
-        -o "$WORK/out_j_sc02" >/dev/null; then
-    compare "$WORK/out_j_sc02" "SC02 (RSA-OAEP): cdoc2-cli container read by umbrik"
+      /work/src/hello.txt >/dev/null 2>&1; then
+  if "$UMBRIK" recipients -f "$WORK/j_sc02.cdoc2" | grep -q SC02; then
+    # Decrypt with a valid EC key so the failure comes from the container's scheme rather than
+    # from the key being unloadable. The output is captured before matching because `pipefail`
+    # would otherwise fail the pipeline on umbrik's non-zero exit, which is the expected result.
+    sc02_output="$("$UMBRIK" decrypt -f "$WORK/j_sc02.cdoc2" \
+        -k "$WORK/keys/cdoc2client_priv.key" -o "$WORK/out_j_sc02" 2>&1 || true)"
+    if printf '%s' "$sc02_output" | grep -qi "SC02 RSA is not supported"; then
+      ok "SC02: cdoc2-cli container parses and is refused as unsupported"
+    else
+      bad "SC02: umbrik did not refuse the container with an unsupported-scheme error"
+    fi
   else
-    bad "SC02 (RSA-OAEP): umbrik could not decrypt cdoc2-cli's container"
+    bad "SC02: umbrik did not report the container as SC02"
   fi
 else
-  bad "SC02 (RSA-OAEP): cdoc2-cli failed to create a container"
+  bad "SC02: cdoc2-cli failed to create a container"
 fi
 
 # ---------------------------------------------------------------------------

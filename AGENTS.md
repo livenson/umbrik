@@ -22,7 +22,8 @@ Four that look wrong but are not:
   classic interop failure.
 - The **key label is a KDF input for SC05 and SC06** but not for SC01 or SC02. Editing a label
   breaks decryption for the first two and nothing for the last two.
-- SC02 uses **no KDF at all** — the KEK is transported directly under RSA-OAEP.
+- SC02 uses **no KDF at all** — the KEK is transported directly under RSA-OAEP. (Not
+  implemented; the constants are recorded for anyone adding it back.)
 
 ## Verification
 
@@ -75,9 +76,10 @@ delivers.
 
 ## Out of scope
 
-Do not implement without asking: **SC07** (key shares — 2.0 draft, needs an SK relying-party
-contract, and could not be gated by interop), **SC03/SC04** (capsule server), **CDOC1**. All
-three parse into distinct "unsupported scheme" errors today; keep it that way.
+Do not implement without asking: **SC02** (RSA — pre-2018 cards; removing it dropped the `rsa`
+crate and the project's only security advisory), **SC07** (key shares — 2.0 draft, needs an SK
+relying-party contract, and could not be gated by interop), **SC03/SC04** (capsule server),
+**CDOC1**. All parse into distinct "unsupported scheme" errors today; keep it that way.
 
 ## Licensing
 

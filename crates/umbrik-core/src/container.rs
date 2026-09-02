@@ -3,11 +3,11 @@
 use std::io::Write;
 use std::path::Path;
 
-use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::aead::{Aead, KeyInit as AeadKeyInit, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use hkdf::Hkdf;
-use hmac::{Hmac, Mac};
-use rand_core::CryptoRngCore;
+use hmac::{Hmac, KeyInit, Mac};
+use rand_core::CryptoRng;
 use sha2::Sha256;
 
 use zeroize::Zeroizing;
@@ -17,11 +17,11 @@ use crate::header::{
     Capsule, Envelope, FmkEncryptionMethod, Header, KdfAlgorithm, PayloadEncryptionMethod,
     RecipientRecord, HMAC_LEN, PRELUDE, VERSION,
 };
-use crate::keys::{Cek, Fmk, Kek, VerifiedHeader, FMK_SALT, KEK_LEN, SALT_LEN};
+use crate::keys::{Cek, Fmk, Kek, VerifiedHeader, FMK_SALT, SALT_LEN};
 use crate::limits::Limits;
 use crate::payload::{self, ArchiveEntry, PayloadFile};
 use crate::provider::{EcPublicKey, KeyOp, KeyProvider, PublicKeyRef};
-use crate::schemes::{sc01, sc02, sc05, sc06};
+use crate::schemes::{sc01, sc05, sc06};
 
 /// Input keying material length for FMK generation.
 ///
@@ -90,18 +90,16 @@ impl std::fmt::Debug for DecryptionKey<'_> {
 }
 
 /// Generate a File Master Key: `HKDF-Extract("CDOC20salt", CSRNG(64))`.
-fn generate_fmk(rng: &mut dyn CryptoRngCore) -> Result<Fmk> {
+fn generate_fmk(rng: &mut dyn CryptoRng) -> Result<Fmk> {
     let mut ikm = Zeroizing::new([0u8; FMK_IKM_LEN]);
-    rng.try_fill_bytes(ikm.as_mut_slice())
-        .map_err(|_| Error::KeyDerivation("RNG failure generating FMK input"))?;
+    rng.fill_bytes(ikm.as_mut_slice());
     let (prk, _) = Hkdf::<Sha256>::extract(Some(FMK_SALT), ikm.as_slice());
     Fmk::try_from_slice(&prk)
 }
 
-fn random_salt(rng: &mut dyn CryptoRngCore) -> Result<Vec<u8>> {
+fn random_salt(rng: &mut dyn CryptoRng) -> Result<Vec<u8>> {
     let mut salt = vec![0u8; SALT_LEN];
-    rng.try_fill_bytes(&mut salt)
-        .map_err(|_| Error::KeyDerivation("RNG failure generating salt"))?;
+    rng.fill_bytes(&mut salt);
     Ok(salt)
 }
 
@@ -109,7 +107,7 @@ fn random_salt(rng: &mut dyn CryptoRngCore) -> Result<Vec<u8>> {
 fn build_recipient_record(
     recipient: &Recipient,
     fmk: &Fmk,
-    rng: &mut dyn CryptoRngCore,
+    rng: &mut dyn CryptoRng,
 ) -> Result<RecipientRecord> {
     let fmk_enc = FmkEncryptionMethod::Xor;
     let fmk_enc_name = fmk_enc.kdf_name()?;
@@ -145,7 +143,6 @@ fn build_recipient_record(
         Recipient::PublicKey { label, key } => {
             let (capsule, kek) = match key {
                 PublicKeyRef::Ec(peer) => build_ecc_record(label, peer, fmk, fmk_enc_name, rng)?,
-                PublicKeyRef::Rsa { pkcs1_der } => build_rsa_record(pkcs1_der, rng)?,
             };
             (capsule, kek, label.clone())
         }
@@ -168,19 +165,19 @@ fn build_ecc_record(
     peer: &EcPublicKey,
     fmk: &Fmk,
     fmk_enc_name: &str,
-    rng: &mut dyn CryptoRngCore,
+    rng: &mut dyn CryptoRng,
 ) -> Result<(Capsule, Kek)> {
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
+    use p256::elliptic_curve::sec1::ToSec1Point;
+    use p256::elliptic_curve::Generate;
 
     let (shared, sender_point) = match peer.curve {
         crate::header::EllipticCurve::Secp384r1 => {
             let peer_pub = p384::PublicKey::from_sec1_bytes(&peer.tls_point)
                 .map_err(|_| Error::InvalidKeyMaterial("invalid recipient EC point"))?;
-            let mut adapter = RngAdapter(&mut *rng);
-            let ephemeral = p384::SecretKey::random(&mut adapter);
+            let ephemeral = p384::SecretKey::generate_from_rng(rng);
             let shared =
                 p384::ecdh::diffie_hellman(ephemeral.to_nonzero_scalar(), peer_pub.as_affine());
-            let point = ephemeral.public_key().to_encoded_point(false);
+            let point = ephemeral.public_key().to_sec1_point(false);
             (
                 Zeroizing::new(shared.raw_secret_bytes().to_vec()),
                 point.as_bytes().to_vec(),
@@ -189,11 +186,10 @@ fn build_ecc_record(
         crate::header::EllipticCurve::Secp256r1 => {
             let peer_pub = p256::PublicKey::from_sec1_bytes(&peer.tls_point)
                 .map_err(|_| Error::InvalidKeyMaterial("invalid recipient EC point"))?;
-            let mut adapter = RngAdapter(&mut *rng);
-            let ephemeral = p256::SecretKey::random(&mut adapter);
+            let ephemeral = p256::SecretKey::generate_from_rng(rng);
             let shared =
                 p256::ecdh::diffie_hellman(ephemeral.to_nonzero_scalar(), peer_pub.as_affine());
-            let point = ephemeral.public_key().to_encoded_point(false);
+            let point = ephemeral.public_key().to_sec1_point(false);
             (
                 Zeroizing::new(shared.raw_secret_bytes().to_vec()),
                 point.as_bytes().to_vec(),
@@ -218,52 +214,6 @@ fn build_ecc_record(
     ))
 }
 
-/// SC02: generate a random KEK and transport it under RSA-OAEP.
-fn build_rsa_record(pkcs1_der: &[u8], rng: &mut dyn CryptoRngCore) -> Result<(Capsule, Kek)> {
-    use rsa::pkcs1::DecodeRsaPublicKey;
-
-    let public_key = rsa::RsaPublicKey::from_pkcs1_der(pkcs1_der)
-        .map_err(|_| Error::InvalidKeyMaterial("invalid RSA public key"))?;
-
-    let mut kek_bytes = Zeroizing::new([0u8; KEK_LEN]);
-    rng.try_fill_bytes(kek_bytes.as_mut_slice())
-        .map_err(|_| Error::KeyDerivation("RNG failure generating KEK"))?;
-
-    // SHA-256 digest and SHA-256 MGF1. See docs/CRYPTO-CONSTANTS.md 6b.
-    let padding = rsa::Oaep::new::<Sha256>();
-    let encrypted_kek = public_key
-        .encrypt(&mut RngAdapter(rng), padding, kek_bytes.as_slice())
-        .map_err(|_| Error::Internal("RSA-OAEP encryption failed"))?;
-
-    Ok((
-        Capsule::RsaPublicKey {
-            recipient_public_key: pkcs1_der.to_vec(),
-            encrypted_kek,
-        },
-        Kek::from_bytes(*kek_bytes),
-    ))
-}
-
-/// Bridges `&mut dyn CryptoRngCore` into the `RngCore + CryptoRng` bound `rsa` requires.
-struct RngAdapter<'a>(&'a mut dyn CryptoRngCore);
-
-impl rand_core::RngCore for RngAdapter<'_> {
-    fn next_u32(&mut self) -> u32 {
-        self.0.next_u32()
-    }
-    fn next_u64(&mut self) -> u64 {
-        self.0.next_u64()
-    }
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        self.0.fill_bytes(dest)
-    }
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> std::result::Result<(), rand_core::Error> {
-        self.0.try_fill_bytes(dest)
-    }
-}
-
-impl rand_core::CryptoRng for RngAdapter<'_> {}
-
 /// Encrypt `files` to `recipients` and write a complete container to `out`.
 ///
 /// `rng` is a parameter rather than a global so that a fixed RNG produces a byte-identical
@@ -271,7 +221,7 @@ impl rand_core::CryptoRng for RngAdapter<'_> {}
 /// directions; golden files can.
 pub fn encrypt(
     out: &mut dyn Write,
-    rng: &mut dyn CryptoRngCore,
+    rng: &mut dyn CryptoRng,
     files: &[PayloadFile],
     recipients: &[Recipient],
 ) -> Result<()> {
@@ -293,7 +243,7 @@ pub fn encrypt(
 
     // HMAC covers the FlatBuffers header only: not the prelude, version, or length field.
     let hhk = fmk.derive_hhk()?;
-    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(hhk.as_bytes())
+    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(hhk.as_bytes())
         .map_err(|_| Error::KeyDerivation("HHK length"))?;
     mac.update(&header_bytes);
     let hmac_bytes = mac.finalize().into_bytes();
@@ -306,15 +256,14 @@ pub fn encrypt(
     let aad = crate::keys::build_aad(&header_bytes, &hmac_arr);
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    rng.try_fill_bytes(&mut nonce_bytes)
-        .map_err(|_| Error::KeyDerivation("RNG failure generating nonce"))?;
+    rng.fill_bytes(&mut nonce_bytes);
 
     let cek = fmk.derive_cek()?;
-    let cipher = ChaCha20Poly1305::new_from_slice(cek.as_bytes())
+    let cipher = <ChaCha20Poly1305 as AeadKeyInit>::new_from_slice(cek.as_bytes())
         .map_err(|_| Error::KeyDerivation("CEK length"))?;
     let ciphertext = cipher
         .encrypt(
-            Nonce::from_slice(&nonce_bytes),
+            &Nonce::from(nonce_bytes),
             Payload {
                 msg: plaintext.as_slice(),
                 aad: &aad,
@@ -360,8 +309,7 @@ fn try_kek(
             fmk_enc_name,
             &record.key_label,
         )?)),
-        (Capsule::EccPublicKey { .. }, DecryptionKey::Provider(provider))
-        | (Capsule::RsaPublicKey { .. }, DecryptionKey::Provider(provider)) => {
+        (Capsule::EccPublicKey { .. }, DecryptionKey::Provider(provider)) => {
             provider_kek(record, *provider, fmk_enc_name)
         }
         (
@@ -437,15 +385,6 @@ fn provider_kek(
             )
             .map(Some)
         }
-        Capsule::RsaPublicKey { encrypted_kek, .. } => {
-            let decrypted = provider.perform(
-                identity,
-                KeyOp::RsaOaep {
-                    ciphertext: encrypted_kek,
-                },
-            )?;
-            sc02::kek_from_decrypted(&decrypted).map(Some)
-        }
         _ => Ok(None),
     }
 }
@@ -474,9 +413,13 @@ fn open_header(
 
     for record in &header.recipients {
         match &record.capsule {
-            Capsule::KeyServer | Capsule::KeyShares | Capsule::Unknown(_) => {
+            Capsule::RsaPublicKey { .. }
+            | Capsule::KeyServer
+            | Capsule::KeyShares
+            | Capsule::Unknown(_) => {
                 if unsupported.is_none() {
                     unsupported = Some(Error::UnsupportedCapsule(match record.capsule {
+                        Capsule::RsaPublicKey { .. } => "SC02 RSA is not supported",
                         Capsule::KeyServer => "SC03/SC04 capsule-server schemes are deferred",
                         Capsule::KeyShares => "SC07 key-shares scheme is out of scope",
                         _ => "unknown capsule type",
@@ -536,11 +479,14 @@ fn decrypt_payload(
     })?;
 
     let cek: Cek = fmk.derive_cek()?;
-    let cipher = ChaCha20Poly1305::new_from_slice(cek.as_bytes())
+    let cipher = <ChaCha20Poly1305 as AeadKeyInit>::new_from_slice(cek.as_bytes())
         .map_err(|_| Error::KeyDerivation("CEK length"))?;
     let plaintext = cipher
         .decrypt(
-            Nonce::from_slice(nonce),
+            &Nonce::try_from(nonce).map_err(|_| Error::Truncated {
+                expected: NONCE_LEN as u64,
+                found: nonce.len() as u64,
+            })?,
             Payload {
                 msg: ciphertext,
                 aad: verified.aad(),

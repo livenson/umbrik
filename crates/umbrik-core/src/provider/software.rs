@@ -4,10 +4,7 @@
 //! PKCS#11 provider in `umbrik-pkcs11` implements the same trait, so everything above this
 //! layer is identical whether the key lives in a file or on a card.
 
-use p256::elliptic_curve::sec1::ToEncodedPoint;
-use rsa::pkcs1::{DecodeRsaPrivateKey, EncodeRsaPublicKey};
-use rsa::Oaep;
-use sha2::Sha256;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use zeroize::Zeroizing;
 
 use super::{EcPublicKey, Identity, KeyOp, KeyProvider, PublicKeyRef};
@@ -18,7 +15,6 @@ use crate::header::EllipticCurve;
 enum SecretKind {
     P256(Box<p256::SecretKey>),
     P384(Box<p384::SecretKey>),
-    Rsa(Box<rsa::RsaPrivateKey>),
 }
 
 /// Holds private keys in memory and performs ECDH or RSA-OAEP with them.
@@ -54,30 +50,24 @@ impl SoftwareKeyProvider {
         if let Ok(sk) = p256::SecretKey::from_sec1_pem(pem) {
             return self.push_p256(sk, label);
         }
-        if let Ok(sk) = rsa::RsaPrivateKey::from_pkcs1_pem(pem) {
-            return self.push_rsa(sk, label);
-        }
-        // PKCS#8 wrapping, tried after the more specific formats.
+        // PKCS#8 wrapping, tried after the more specific format.
         {
-            use rsa::pkcs8::DecodePrivateKey;
+            use p384::pkcs8::DecodePrivateKey;
             if let Ok(sk) = p384::SecretKey::from_pkcs8_pem(pem) {
                 return self.push_p384(sk, label);
             }
             if let Ok(sk) = p256::SecretKey::from_pkcs8_pem(pem) {
                 return self.push_p256(sk, label);
             }
-            if let Ok(sk) = rsa::RsaPrivateKey::from_pkcs8_pem(pem) {
-                return self.push_rsa(sk, label);
-            }
         }
 
         Err(Error::InvalidKeyMaterial(
-            "unrecognised private key PEM (expected EC or RSA)",
+            "unrecognised private key PEM (expected an EC key on secp256r1 or secp384r1)",
         ))
     }
 
     fn push_p384(&mut self, sk: p384::SecretKey, label: String) -> Result<()> {
-        let point = sk.public_key().to_encoded_point(false);
+        let point = sk.public_key().to_sec1_point(false);
         let identity = Identity {
             label,
             key: PublicKeyRef::Ec(EcPublicKey {
@@ -91,7 +81,7 @@ impl SoftwareKeyProvider {
     }
 
     fn push_p256(&mut self, sk: p256::SecretKey, label: String) -> Result<()> {
-        let point = sk.public_key().to_encoded_point(false);
+        let point = sk.public_key().to_sec1_point(false);
         let identity = Identity {
             label,
             key: PublicKeyRef::Ec(EcPublicKey {
@@ -101,22 +91,6 @@ impl SoftwareKeyProvider {
         };
         self.entries
             .push((identity, SecretKind::P256(Box::new(sk))));
-        Ok(())
-    }
-
-    fn push_rsa(&mut self, sk: rsa::RsaPrivateKey, label: String) -> Result<()> {
-        // The capsule stores PKCS#1 RSAPublicKey, so match on that encoding.
-        let der = sk
-            .to_public_key()
-            .to_pkcs1_der()
-            .map_err(|_| Error::InvalidKeyMaterial("cannot encode RSA public key"))?;
-        let identity = Identity {
-            label,
-            key: PublicKeyRef::Rsa {
-                pkcs1_der: der.as_bytes().to_vec(),
-            },
-        };
-        self.entries.push((identity, SecretKind::Rsa(Box::new(sk))));
         Ok(())
     }
 
@@ -167,18 +141,6 @@ impl KeyProvider for SoftwareKeyProvider {
                     p256::ecdh::diffie_hellman(sk.to_nonzero_scalar(), peer_pub.as_affine());
                 Ok(Zeroizing::new(shared.raw_secret_bytes().to_vec()))
             }
-            (SecretKind::Rsa(sk), KeyOp::RsaOaep { ciphertext }) => {
-                // SHA-256 for both the digest and MGF1. `Oaep::new::<D>` uses D for both;
-                // defaulting MGF1 to SHA-1 is the classic interop failure here.
-                let padding = Oaep::new::<Sha256>();
-                let plaintext = sk
-                    .decrypt(padding, ciphertext)
-                    .map_err(|_| Error::KeyProvider("RSA-OAEP decryption failed".to_string()))?;
-                Ok(Zeroizing::new(plaintext))
-            }
-            _ => Err(Error::KeyProvider(
-                "key type does not support the requested operation".to_string(),
-            )),
         }
     }
 }
