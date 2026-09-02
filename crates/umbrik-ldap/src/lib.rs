@@ -126,6 +126,52 @@ fn search_filter(id_code: &str) -> String {
 /// One directory entry: its DN, and the DER certificates it carries.
 pub type DirectoryEntry = (String, Vec<Vec<u8>>);
 
+/// Why a directory entry was not usable.
+///
+/// A person's id code typically returns several credentials — an ID-card, a Digi-ID, Mobile-ID —
+/// each with an authentication and a signing certificate. Most are dropped, and silently
+/// dropping them makes "no usable certificate found" impossible to diagnose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rejection {
+    /// A signing certificate. Marked Non-Repudiation and cannot perform key agreement.
+    NotAuthentication,
+    /// Mobile-ID. The private key is in the SIM and is only reachable through the Mobile-ID
+    /// protocol, never PKCS#11, so a container encrypted to it could not be opened.
+    MobileId,
+    /// An RSA key (SC02) or an unsupported curve.
+    UnsupportedKey,
+    /// The certificate would not parse.
+    Unparseable,
+}
+
+impl Rejection {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Rejection::NotAuthentication => "signing certificate, cannot perform key agreement",
+            Rejection::MobileId => "Mobile-ID, key is in the SIM and unreachable via PKCS#11",
+            Rejection::UnsupportedKey => "unsupported key type (RSA or unknown curve)",
+            Rejection::Unparseable => "certificate did not parse",
+        }
+    }
+}
+
+/// A directory entry that was considered and dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rejected {
+    pub dn: String,
+    pub reason: Rejection,
+}
+
+/// Everything a lookup considered.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Lookup {
+    /// Certificates umbrik can encrypt to. Every one becomes a recipient, so any of the holder's
+    /// cards opens the container.
+    pub matches: Vec<DirectoryMatch>,
+    /// What was found and dropped, with the reason.
+    pub rejected: Vec<Rejected>,
+}
+
 /// A certificate found in the directory, with what the DN says about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectoryMatch {
@@ -151,20 +197,28 @@ pub fn card_type_for_dn(dn: &str) -> &'static str {
     }
 }
 
-/// Whether an entry's DN denotes a certificate usable for CDOC2 encryption.
+/// Why an entry's DN is or is not usable for CDOC2 encryption.
 ///
-/// Requires an authentication certificate, and excludes organisations whose keys cannot be
-/// reached through PKCS#11. Matching is case-insensitive and whitespace-tolerant because the two
-/// directories disagree on spacing: SK writes `o=Identity card of Estonian citizen`, Zetes
-/// writes `o=IdentityCardEstonianCitizen`.
-pub fn is_usable_dn(dn: &str) -> bool {
+/// Matching is case-insensitive and whitespace-tolerant because the two directories disagree on
+/// spacing: SK writes `o=Identity card of Estonian citizen`, Zetes writes
+/// `o=IdentityCardEstonianCitizen`.
+pub fn classify_dn(dn: &str) -> Option<Rejection> {
     let normalised = dn.to_ascii_lowercase().replace(' ', "");
     if !normalised.contains(&AUTHENTICATION_OU.to_ascii_lowercase().replace(' ', "")) {
-        return false;
+        return Some(Rejection::NotAuthentication);
     }
-    !EXCLUDED_ORGANISATIONS
+    if EXCLUDED_ORGANISATIONS
         .iter()
         .any(|excluded| normalised.contains(&excluded.to_ascii_lowercase().replace(' ', "")))
+    {
+        return Some(Rejection::MobileId);
+    }
+    None
+}
+
+/// Whether an entry's DN denotes a certificate usable for CDOC2 encryption.
+pub fn is_usable_dn(dn: &str) -> bool {
+    classify_dn(dn).is_none()
 }
 
 /// Choose the usable certificates from a set of directory entries.
@@ -172,25 +226,41 @@ pub fn is_usable_dn(dn: &str) -> bool {
 /// Pure, so the selection rules are testable without a network. Certificates that fail to parse
 /// are skipped rather than fatal — one malformed entry must not hide a valid one beside it.
 /// Duplicates are removed by public key, since a person may appear in both directories.
-pub fn select_certificates(entries: Vec<DirectoryEntry>) -> Vec<DirectoryMatch> {
-    let mut out: Vec<DirectoryMatch> = Vec::new();
+pub fn select_certificates(entries: Vec<DirectoryEntry>) -> Lookup {
+    let mut out = Lookup::default();
     for (dn, certificates) in entries {
-        if !is_usable_dn(&dn) {
+        if let Some(reason) = classify_dn(&dn) {
+            out.rejected.push(Rejected { dn, reason });
             continue;
         }
         let card_type = card_type_for_dn(&dn);
         for der in certificates {
-            if let Ok(recipient) = cert::from_der(&der) {
-                if !out
-                    .iter()
-                    .any(|existing| existing.recipient.key == recipient.key)
-                {
-                    out.push(DirectoryMatch {
+            match cert::from_der(&der) {
+                Ok(recipient) => {
+                    if out
+                        .matches
+                        .iter()
+                        .any(|existing| existing.recipient.key == recipient.key)
+                    {
+                        continue;
+                    }
+                    out.matches.push(DirectoryMatch {
                         recipient,
                         dn: dn.clone(),
                         card_type,
                     });
                 }
+                // An RSA certificate (SC02, out of scope) is reported rather than dropped
+                // silently: someone holding only a pre-2018 card needs to know that is why.
+                Err(err) => out.rejected.push(Rejected {
+                    dn: dn.clone(),
+                    reason: match err.code() {
+                        umbrik_core::error::ErrorCode::UnsupportedCapsule => {
+                            Rejection::UnsupportedKey
+                        }
+                        _ => Rejection::Unparseable,
+                    },
+                }),
             }
         }
     }
@@ -239,7 +309,7 @@ fn search_one(directory: &Directory, id_code: &str) -> Result<Vec<DirectoryEntry
 /// as "not found", which would be misleading.
 ///
 /// An empty result is not an error: the person may have no active card.
-pub fn lookup(directories: &[Directory], id_code: &str) -> Result<Vec<DirectoryMatch>, Error> {
+pub fn lookup(directories: &[Directory], id_code: &str) -> Result<Lookup, Error> {
     validate_id_code(id_code)?;
 
     let mut entries = Vec::new();
@@ -348,13 +418,71 @@ mod tests {
         );
     }
 
+    /// Every rejection carries a reason, so "nothing usable" can be explained rather than just
+    /// reported.
+    #[test]
+    fn rejections_say_why() {
+        assert_eq!(
+            classify_dn("cn=X,ou=Digital Signature,o=Identity card of Estonian citizen,c=EE"),
+            Some(Rejection::NotAuthentication)
+        );
+        assert_eq!(
+            classify_dn("cn=X,ou=Authentication,o=Mobile-ID,dc=ESTEID,c=EE"),
+            Some(Rejection::MobileId)
+        );
+        assert_eq!(
+            classify_dn("cn=X,ou=Authentication,o=Identity card of Estonian citizen,c=EE"),
+            None
+        );
+    }
+
+    /// A real id code returns several credentials. Everything dropped must be accounted for, or
+    /// a user holding only an unusable card has no way to find out why.
+    #[test]
+    fn every_dropped_entry_is_reported() {
+        let entries = vec![
+            (
+                "cn=X,ou=Authentication,o=Mobile-ID,dc=ESTEID,c=EE".to_string(),
+                vec![b"not a certificate".to_vec()],
+            ),
+            (
+                "cn=X,ou=Digital Signature,o=Identity card of Estonian citizen,c=EE".to_string(),
+                vec![b"not a certificate".to_vec()],
+            ),
+        ];
+        let lookup = select_certificates(entries);
+        assert!(lookup.matches.is_empty());
+        assert_eq!(lookup.rejected.len(), 2);
+        assert!(lookup
+            .rejected
+            .iter()
+            .any(|r| r.reason == Rejection::MobileId));
+        assert!(lookup
+            .rejected
+            .iter()
+            .any(|r| r.reason == Rejection::NotAuthentication));
+        for rejected in &lookup.rejected {
+            assert!(!rejected.reason.reason().is_empty());
+        }
+    }
+
+    /// An RSA certificate is out of scope since SC02 was removed, and must be reported as such
+    /// rather than silently dropped as unparseable.
+    #[test]
+    fn rsa_certificates_are_reported_as_unsupported() {
+        assert_eq!(
+            Rejection::UnsupportedKey.reason(),
+            "unsupported key type (RSA or unknown curve)"
+        );
+    }
+
     #[test]
     fn skips_unparseable_certificates_without_failing() {
         let entries = vec![(
             "cn=SOMEONE,ou=Authentication,o=Identity card of Estonian citizen".to_string(),
             vec![b"not a certificate".to_vec()],
         )];
-        assert!(select_certificates(entries).is_empty());
+        assert!(select_certificates(entries).matches.is_empty());
     }
 
     #[test]

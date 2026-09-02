@@ -73,6 +73,17 @@ secret. Keep it that way: making a leak require a new method is a stronger guara
 remembering not to pass the wrong value. `verbose_output_never_contains_secrets` runs the binary
 at `-vv` and greps its output for the password, key and plaintext.
 
+## Directory lookups
+
+A single id code returns several credentials — ID-card, Digi-ID, Mobile-ID, each with an
+authentication and a signing certificate. `umbrik-ldap` keeps every authentication certificate on
+a physical card and reports the rest with a reason; `-v` prints them. Silently dropping a
+candidate makes "no usable certificate" impossible to diagnose, which is why `Lookup` carries
+`rejected` alongside `matches`.
+
+When several survive, all of them become recipients: the holder can open the container with any
+of their cards.
+
 ## Certificates
 
 Validity dates are checked and a certificate outside its window is refused unless
