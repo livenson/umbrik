@@ -9,9 +9,12 @@ use std::process::Command;
 
 const BIN: &str = env!("CARGO_BIN_EXE_umbrik");
 
-/// Distinctive enough that a substring search cannot miss it.
+/// Distinctive enough that a substring search cannot miss them.
 const PASSWORD: &str = "Tr0ubador-SECRET-PASSPHRASE-do-not-log";
 const SECRET_B64: &str = "c3VwZXItc2VjcmV0LTMyLWJ5dGUta2V5LW1hdGVyaWFsIQ==";
+/// What `SECRET_B64` decodes to. Checking only the base64 form would miss a leak of the decoded
+/// bytes, which is the value the library actually holds.
+const SECRET_PLAIN: &str = "super-secret-32-byte-key-material!";
 const PLAINTEXT: &str = "CONFIDENTIAL-PAYLOAD-CONTENTS";
 
 struct Fixture {
@@ -52,11 +55,24 @@ fn run(args: &[&str]) -> String {
 }
 
 fn assert_no_secrets(output: &str, context: &str) {
-    for (what, needle) in [
+    // Every representation a leak could plausibly take: the value as given, the decoded bytes as
+    // text, their hex, and their Debug form. A check for only the base64 input would pass while
+    // the raw key was being printed.
+    let secret_hex: String = SECRET_PLAIN.bytes().map(|b| format!("{b:02x}")).collect();
+    let secret_debug = format!("{:?}", SECRET_PLAIN.as_bytes());
+    let password_debug = format!("{:?}", PASSWORD.as_bytes());
+
+    let forbidden: Vec<(&str, &str)> = vec![
         ("the password", PASSWORD),
-        ("the pre-shared key", SECRET_B64),
+        ("the password as bytes", &password_debug),
+        ("the pre-shared key (base64)", SECRET_B64),
+        ("the pre-shared key (decoded)", SECRET_PLAIN),
+        ("the pre-shared key (hex)", &secret_hex),
+        ("the pre-shared key (bytes)", &secret_debug),
         ("the plaintext", PLAINTEXT),
-    ] {
+    ];
+
+    for (what, needle) in forbidden {
         assert!(
             !output.contains(needle),
             "{context}: {what} appeared in diagnostic output\n--- output ---\n{output}"
