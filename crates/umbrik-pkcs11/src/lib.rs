@@ -325,23 +325,6 @@ impl KeyProvider for Pkcs11KeyProvider {
                 }
                 self.ecdh(&session, private_key, &peer.tls_point, secret_len)
             }
-            KeyOp::RsaOaep { ciphertext } => {
-                // CARD-SPECIFIC: OAEP parameters must be SHA-256 digest *and* SHA-256 MGF1.
-                // See docs/CRYPTO-CONSTANTS.md section 6b — defaulting MGF1 to SHA-1 is the
-                // classic interop failure, and some tokens do exactly that.
-                use cryptoki::mechanism::rsa::{PkcsMgfType, PkcsOaepParams, PkcsOaepSource};
-                use cryptoki::mechanism::MechanismType;
-
-                let params = PkcsOaepParams::new(
-                    MechanismType::SHA256,
-                    PkcsMgfType::MGF1_SHA256,
-                    PkcsOaepSource::empty(),
-                );
-                let plaintext = session
-                    .decrypt(&Mechanism::RsaPkcsOaep(params), private_key, ciphertext)
-                    .map_err(|e| provider_err("RSA-OAEP decryption", e))?;
-                Ok(Zeroizing::new(plaintext))
-            }
             _ => Err(Error::KeyProvider(
                 "unsupported operation for a PKCS#11 key".into(),
             )),

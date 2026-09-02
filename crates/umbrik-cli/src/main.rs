@@ -583,7 +583,7 @@ fn run_encrypt(req: EncryptRequest<'_>) -> Result<()> {
     let files = collect_files(inputs)?;
     let mut out =
         std::fs::File::create(file).with_context(|| format!("creating {}", file.display()))?;
-    let mut rng = rand::rngs::OsRng;
+    let mut rng = rand::rng();
 
     umbrik_core::encrypt(&mut out, &mut rng, &files, &recipients)
         .map_err(|e| anyhow::anyhow!("{e}"))
@@ -707,9 +707,6 @@ fn main() -> Result<()> {
                 let kind = match &identity.key {
                     umbrik_core::provider::PublicKeyRef::Ec(key) => {
                         format!("EC {:?}", key.curve)
-                    }
-                    umbrik_core::provider::PublicKeyRef::Rsa { pkcs1_der } => {
-                        format!("RSA ({} byte key)", pkcs1_der.len())
                     }
                     _ => "unknown".to_string(),
                 };

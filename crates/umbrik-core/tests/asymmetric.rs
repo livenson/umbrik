@@ -77,18 +77,58 @@ fn decrypts_sc01_p256_container_from_reference_cli() {
     assert_eq!(files[0].name, "README.md");
 }
 
+/// SC02 is not supported: pre-2018 RSA cards are out of scope. Such a container must still
+/// *parse*, and report an unsupported scheme rather than a parse failure — the two are different
+/// conditions and a user needs to be able to tell them apart.
 #[test]
-fn decrypts_sc02_rsa_container_from_reference_cli() {
-    let provider = provider_with("rsa_priv.pem");
+fn sc02_container_parses_and_reports_unsupported() {
     let container = vector("rsa_simple.cdoc2");
 
-    let files = container::decrypt_to_memory(
+    let header = Envelope::parse(&container)
+        .unwrap()
+        .decode_header()
+        .expect("an unsupported scheme must still parse");
+    assert!(matches!(
+        header.recipients[0].capsule,
+        Capsule::RsaPublicKey { .. }
+    ));
+    assert_eq!(header.recipients[0].capsule.scheme(), "SC02");
+
+    let provider = provider_with("cdoc2client_priv.key");
+    let err = container::decrypt_to_memory(
         &container,
         &DecryptionKey::Provider(&provider),
         &Limits::default(),
     )
-    .expect("SC02 decryption must succeed");
-    assert_eq!(files[0].name, "README.md");
+    .unwrap_err();
+    assert_eq!(err.code(), ErrorCode::UnsupportedCapsule);
+}
+
+/// An RSA certificate is refused at parse time, with a reason naming the scheme.
+#[test]
+fn rsa_certificates_are_refused() {
+    let pem = std::process::Command::new("openssl")
+        .args([
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            "/dev/null",
+            "-subj",
+            "/CN=RSA TEST",
+            "-days",
+            "1",
+        ])
+        .output();
+    let Ok(out) = pem else { return }; // openssl unavailable: nothing to assert
+    let text = String::from_utf8_lossy(&out.stdout);
+    if !text.contains("BEGIN CERTIFICATE") {
+        return;
+    }
+    let err = cert::from_pem(&text).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::UnsupportedCapsule);
 }
 
 // ---------------------------------------------------------------------------
@@ -112,21 +152,9 @@ impl KeyProvider for NeverPerform {
     }
 }
 
-#[test]
-fn non_matching_recipient_never_triggers_a_key_operation() {
-    // An RSA key against an EC container: no identity can match.
-    let provider = NeverPerform(provider_with("rsa_priv.pem"));
-    let container = vector("ec_simple.cdoc2");
-
-    let err = container::decrypt_to_memory(
-        &container,
-        &DecryptionKey::Provider(&provider),
-        &Limits::default(),
-    )
-    .unwrap_err();
-    assert_eq!(err.code(), ErrorCode::NoMatchingRecipient);
-}
-
+/// A container addressed to someone else must be reported as a non-match, and must never reach
+/// the key operation. `NeverPerform` panics if it does: on a real card, reaching `perform` would
+/// mean a needless PIN prompt, and a wrong PIN counts against a three-attempt limit.
 #[test]
 fn wrong_ec_key_does_not_match_recipient() {
     // P-256 key, P-384 container.
@@ -211,13 +239,8 @@ fn sc01_encrypt_decrypt_round_trip() {
     };
 
     let mut container = Vec::new();
-    container::encrypt(
-        &mut container,
-        &mut rand_core::OsRng,
-        &files(),
-        &[recipient],
-    )
-    .expect("SC01 encrypt");
+    container::encrypt(&mut container, &mut rand::rng(), &files(), &[recipient])
+        .expect("SC01 encrypt");
 
     let provider = provider_with("cdoc2client_priv.key");
     let out = container::decrypt_to_memory(
@@ -226,33 +249,6 @@ fn sc01_encrypt_decrypt_round_trip() {
         &Limits::default(),
     )
     .expect("SC01 decrypt");
-    assert_eq!(out, files());
-}
-
-#[test]
-fn sc02_encrypt_decrypt_round_trip() {
-    // Derive the recipient public key from the private key we will decrypt with.
-    let provider = provider_with("rsa_priv.pem");
-    let identity = provider.identities().unwrap().remove(0);
-
-    let mut container = Vec::new();
-    container::encrypt(
-        &mut container,
-        &mut rand_core::OsRng,
-        &files(),
-        &[Recipient::PublicKey {
-            label: "rsa-recipient".to_string(),
-            key: identity.key,
-        }],
-    )
-    .expect("SC02 encrypt");
-
-    let out = container::decrypt_to_memory(
-        &container,
-        &DecryptionKey::Provider(&provider),
-        &Limits::default(),
-    )
-    .expect("SC02 decrypt");
     assert_eq!(out, files());
 }
 
@@ -266,7 +262,7 @@ fn sc01_key_label_is_not_cryptographically_binding() {
     let mut container = Vec::new();
     container::encrypt(
         &mut container,
-        &mut rand_core::OsRng,
+        &mut rand::rng(),
         &files(),
         &[Recipient::PublicKey {
             label: "an-arbitrary-label".to_string(),

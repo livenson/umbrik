@@ -59,8 +59,7 @@ pub struct CertificateRecipient {
     /// by it — so its collision weakness is not relevant.
     pub sha1: String,
     pub key: PublicKeyRef,
-    /// Whether the certificate's `keyUsage` permits establishing a key — `keyAgreement` for EC,
-    /// `keyEncipherment` for RSA.
+    /// Whether the certificate's `keyUsage` permits `keyAgreement`.
     ///
     /// This is what separates an authentication certificate from a signing one. An Estonian
     /// card carries both: `Isikutuvastus` (authentication, `Digital Signature, Key Agreement`)
@@ -104,12 +103,16 @@ pub fn public_key_from_pem(pem: &str) -> Result<PublicKeyRef> {
 fn from_certificate(cert: &Certificate, der: &[u8]) -> Result<CertificateRecipient> {
     use sha1::Digest;
 
-    let key = public_key_from_spki(&cert.tbs_certificate.subject_public_key_info)?;
-    let subject = cert.tbs_certificate.subject.to_string();
-    let sha1 = format!("{:x}", sha1::Sha1::digest(der));
+    let key = public_key_from_spki(cert.tbs_certificate().subject_public_key_info())?;
+    let subject = cert.tbs_certificate().subject().to_string();
+    // sha1 0.11 returns an Array, which has no LowerHex impl.
+    let sha1 = sha1::Sha1::digest(der)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let to_unix = |t: &x509_cert::time::Time| i64::try_from(t.to_unix_duration().as_secs()).ok();
-    let not_before = to_unix(&cert.tbs_certificate.validity.not_before);
-    let not_after = to_unix(&cert.tbs_certificate.validity.not_after);
+    let not_before = to_unix(&cert.tbs_certificate().validity().not_before);
+    let not_after = to_unix(&cert.tbs_certificate().validity().not_after);
 
     Ok(CertificateRecipient {
         can_establish_key: permits_key_establishment(cert),
@@ -173,7 +176,7 @@ const OID_KEY_USAGE: &str = "2.5.29.15";
 /// treated the same way: `keyUsage` is advisory metadata, and failing to parse it should not
 /// silently exclude an otherwise valid recipient.
 fn permits_key_establishment(cert: &Certificate) -> bool {
-    let Some(extensions) = cert.tbs_certificate.extensions.as_ref() else {
+    let Some(extensions) = cert.tbs_certificate().extensions() else {
         return true;
     };
     let Some(extension) = extensions
@@ -186,7 +189,7 @@ fn permits_key_establishment(cert: &Certificate) -> bool {
         return true;
     };
 
-    // EC keys agree; RSA keys encipher. A signing-only certificate has neither.
+    // A signing-only certificate has neither.
     usage.key_agreement() || usage.key_encipherment()
 }
 
@@ -257,18 +260,15 @@ fn public_key_from_spki(spki: &SubjectPublicKeyInfoOwned) -> Result<PublicKeyRef
             tls_point: point.to_vec(),
         })
     } else if algorithm == OID_RSA_ENCRYPTION {
-        // SPKI wraps PKCS#1 RSAPublicKey, which is the encoding the capsule stores.
-        let der = spki
-            .subject_public_key
-            .as_bytes()
-            .ok_or(Error::InvalidKeyMaterial(
-                "RSA public key is not byte aligned",
-            ))?;
-        PublicKeyRef::Rsa {
-            pkcs1_der: der.to_vec(),
-        }
+        // SC02 is not implemented: pre-2018 RSA cards are out of scope. Rejected here with a
+        // clear reason rather than deeper in, where it would surface as a missing key type.
+        return Err(Error::UnsupportedCapsule(
+            "RSA recipients (SC02) are not supported",
+        ));
     } else {
-        return Err(Error::InvalidKeyMaterial("key is neither EC nor RSA"));
+        return Err(Error::InvalidKeyMaterial(
+            "certificate key is not an elliptic-curve key",
+        ));
     };
 
     Ok(key)

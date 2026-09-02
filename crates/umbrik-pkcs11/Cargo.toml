@@ -14,4 +14,4 @@ cryptoki.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-rand_core = { workspace = true, features = ["getrandom"] }
+rand.workspace = true

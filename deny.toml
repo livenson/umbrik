@@ -38,28 +38,6 @@ wildcards = "deny"
 version = 2
 yanked = "deny"
 
-ignore = [
-    # Marvin Attack: the `rsa` crate's private-key operation is not fully constant-time, so an
-    # attacker who can have many chosen ciphertexts decrypted *and* measure the timing precisely
-    # may recover the key. There is no fixed release; the maintainers have no constant-time
-    # implementation to upgrade to.
-    #
-    # Exposure in umbrik is limited to **SC02 decryption with a software RSA key**:
-    #
-    #   - SC02 with a card or token is unaffected. RSA-OAEP runs inside the PKCS#11 module, and
-    #     the private key never reaches this crate. Estonian legacy RSA cards take this path.
-    #   - SC01, SC05 and SC06 never touch `rsa` at all.
-    #   - Encryption is unaffected: it is a public-key operation.
-    #
-    # Exploiting it requires a decryption oracle — the victim decrypting many attacker-chosen
-    # containers while the attacker times each one. A person decrypting a file they received is
-    # not in that position; an automated service built on umbrik that decrypts untrusted
-    # containers on demand would be, and should use a token for RSA keys.
-    #
-    # Recorded rather than silenced so the trade-off stays visible in CI output. Revisit if a
-    # constant-time RSA implementation becomes available.
-    { id = "RUSTSEC-2023-0071", reason = "no fixed release; limited to software-RSA SC02 decryption, see SECURITY.md" },
-]
 
 [sources]
 unknown-registry = "deny"

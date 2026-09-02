@@ -19,13 +19,16 @@ Targets **CDOC2 specification 1.7**.
 | SC05 | Pre-shared symmetric key | Implemented |
 | SC06 | Password (PBKDF2) | Implemented |
 | SC01 | ECDH, secp384r1 / secp256r1 | Implemented, software keys and PKCS#11 tokens |
-| SC02 | RSA-OAEP, legacy RSA cards | Implemented, software keys and PKCS#11 tokens |
+| SC02 | RSA-OAEP, pre-2018 RSA cards | **Not supported** — out of scope |
 | SC03 / SC04 | Capsule-server variants | Deferred |
 | SC07 | N-of-N key shares (Smart-ID / Mobile-ID) | Out of scope — 2.0 draft only |
 
-CDOC1, the legacy XML-Encryption format, is out of scope including read support.
+CDOC1, the legacy XML-Encryption format, is out of scope including read support. So is SC02:
+Estonian cards have been elliptic-curve since 2018, and dropping RSA removed the project's only
+outstanding security advisory along with it. An SC02 container still parses and reports an
+unsupported scheme rather than failing as malformed.
 
-All four implemented schemes are round-tripped against the reference `cdoc2-cli` in both
+All three implemented schemes are round-tripped against the reference `cdoc2-cli` in both
 directions on every commit. SC01 has also been verified against a physical Estonian ID-card in
 both directions with DigiDoc4.
 
@@ -64,7 +67,7 @@ The Linux block above is executed verbatim by CI on a clean runner, so these ste
 # Encrypt with a password, a pre-shared key, a certificate, or an id code
 umbrik encrypt -f secrets.cdoc2 --password "my-label:hunter2" report.pdf
 umbrik encrypt -f secrets.cdoc2 --secret "my-label:base64,$(head -c32 /dev/urandom | base64)" report.pdf
-umbrik encrypt -f secrets.cdoc2 -c recipient.pem report.pdf
+umbrik encrypt -f secrets.cdoc2 -c recipient.pem report.pdf   # EC certificates only
 umbrik encrypt -f secrets.cdoc2 -r 38001085718 report.pdf
 
 # Recipient options combine and repeat; any one of them opens the container

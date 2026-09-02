@@ -124,5 +124,3 @@ so means the next push is unverified, so restore it in the same sitting.
 - **Interop failures after a dependency bump.** No tool decides whether the cryptography changed.
 - **Bumping pinned upstream commits** in `tests/interop/Dockerfile` and `schema/PROVENANCE.md`,
   so "upstream changed" is never mistaken for "umbrik regressed".
-- **The accepted risk in `deny.toml`** (RUSTSEC-2023-0071, RSA timing), revisited if a
-  constant-time implementation appears.

@@ -250,7 +250,7 @@ fn encrypt<'py>(
     // Releasing the GIL matters here: SC06 runs 600 000 PBKDF2 iterations and would otherwise
     // block every other thread in the interpreter.
     py.detach(|| {
-        let mut rng = rand::rngs::OsRng;
+        let mut rng = rand::rng();
         container::encrypt(&mut out, &mut rng, &payload, &recipients)
     })
     .map_err(to_py_err)?;
