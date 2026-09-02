@@ -12,7 +12,10 @@ and byte range is published. If you cannot find a value in the specification or 
 your way to a plausible value.
 
 All constants are recorded with citations in [`docs/CRYPTO-CONSTANTS.md`](docs/CRYPTO-CONSTANTS.md).
-Add to it rather than scattering literals through the code.
+Add to it rather than scattering literals through the code. That citation, not CodeQL, is what
+guards this: `rust/hard-coded-cryptographic-value` is excluded in
+[`.github/codeql/config.yml`](.github/codeql/config.yml), which explains why it cannot be right
+about published wire constants.
 
 Four that look wrong but are not:
 

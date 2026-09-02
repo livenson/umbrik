@@ -1,0 +1,37 @@
+name: umbrik CodeQL configuration
+
+# security-extended over the default suite: it adds the cryptography and untrusted-input queries,
+# which is the half of CodeQL that matches umbrik's attack surface. Container bytes are parsed
+# before anything is authenticated.
+queries:
+  - uses: security-extended
+
+query-filters:
+  # rust/hard-coded-cryptographic-value fires on every constant in the crate and has been wrong
+  # all eighteen times: sixteen test vectors, and the two HKDF info strings in container.rs.
+  #
+  # It cannot be otherwise here. The query looks for a key or salt an attacker could read out of
+  # the binary, but CDOC2's salts and info strings -- "CDOC20salt", "CDOC20cek", "CDOC20hmac",
+  # "CDOC20payload" -- are published wire-format constants. Every implementation hard-codes the
+  # same bytes; that is what makes containers interoperable. A value read from configuration
+  # instead would be a bug. The test vectors are hard-coded for the same reason: a vector that
+  # was generated rather than fixed would prove nothing.
+  #
+  # Dismissing each alert by hand does not scale -- a new vector means a new alert -- and it
+  # trains us to click "false positive" on this rule without reading it, which is worse than
+  # excluding it deliberately.
+  #
+  # What covers this instead, and covers it better:
+  #   - docs/CRYPTO-CONSTANTS.md cites every constant to the specification and to
+  #     open-eid/cdoc2-java-ref-impl, and AGENTS.md forbids adding one without a citation.
+  #   - tests/interop/run.sh round trips against the reference cdoc2-cli in both directions,
+  #     which is the only thing that catches a wrong constant. A self-consistent wrong value
+  #     passes every unit test in both directions; it fails interop immediately.
+  #   - A fixed-RNG golden file pins the exact output bytes, so a constant cannot change
+  #     unnoticed.
+  #
+  # Revisit if umbrik ever gains a genuine secret in source -- a default password, an API key.
+  # Nothing of that kind exists today, and the review checklist for a new constant is the
+  # citation requirement above.
+  - exclude:
+      id: rust/hard-coded-cryptographic-value

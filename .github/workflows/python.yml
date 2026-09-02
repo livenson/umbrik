@@ -17,7 +17,7 @@ permissions: {}
 
 jobs:
   wheels:
-    name: Wheel ${{ matrix.target }}
+    name: Wheel ${{ matrix.os }} ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -29,15 +29,27 @@ jobs:
           - { os: ubuntu-24.04-arm, target: aarch64, manylinux: auto }
           - { os: macos-latest,     target: aarch64, manylinux: "off" }
           - { os: macos-15-intel,   target: x86_64,  manylinux: "off" }
+          - { os: windows-latest,   target: x86_64,  manylinux: "off" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
-      - name: Install flatc (macOS)
-        if: runner.os == 'macOS'
-        run: brew install flatbuffers
+      # Linux builds inside the manylinux container and installs flatc there instead, via
+      # before-script-linux below. macOS and Windows build on the runner itself.
+      #
+      # scripts/install-flatc.sh rather than brew or choco: it reads the version from Cargo.toml,
+      # so it cannot drift from the `flatbuffers` crate. A mismatch generates code that does not
+      # compile, and a distribution package is whatever version it happens to be that week.
+      - name: Install flatc
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          scripts/install-flatc.sh
+          echo "${{ runner.temp }}/bin" >> "$GITHUB_PATH"
+        env:
+          FLATC_BIN_DIR: ${{ runner.temp }}/bin
 
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
@@ -68,10 +80,15 @@ jobs:
           if-no-files-found: error
 
   # The point of abi3: one wheel, every supported interpreter. Verified, not assumed.
+  #
+  # Linux carries the full interpreter sweep. Windows runs one version, because what is in doubt
+  # there is the platform rather than the ABI — umbrik-python is not a default workspace member,
+  # so a plain `cargo build` on the Windows CI job never compiles it, and this is the only thing
+  # that exercises the binding on Windows at all.
   test:
-    name: Test wheel on Python ${{ matrix.python }}
+    name: Test wheel on ${{ matrix.os }} Python ${{ matrix.python }}
     needs: wheels
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     strategy:
@@ -80,6 +97,9 @@ jobs:
         # Every CPython still receiving upstream support. 3.9 reached end of life in
         # October 2025 and is deliberately excluded.
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        os: [ubuntu-latest]
+        include:
+          - { os: windows-latest, python: "3.10" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -88,10 +108,12 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: wheel-ubuntu-latest-x86_64
+          name: wheel-${{ matrix.os }}-x86_64
           path: dist
 
       - name: Install the wheel and run the tests
+        # bash on the Windows runner too: PowerShell does not expand the wheel glob.
+        shell: bash
         run: |
           python -m pip install --upgrade pip pytest
           # The same cp310-abi3 wheel is installed on every version in the matrix.
