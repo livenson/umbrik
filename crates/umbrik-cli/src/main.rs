@@ -564,15 +564,44 @@ fn run_encrypt(req: EncryptRequest<'_>) -> Result<()> {
         let found = umbrik_ldap::lookup(&directories, id_code)
             .map_err(|e| anyhow::anyhow!("{e}"))
             .with_context(|| format!("looking up id code {id_code}"))?;
-        if found.is_empty() {
+        // Everything considered and dropped, so "nothing usable" is diagnosable rather than
+        // merely disappointing.
+        if v.enabled() && !found.rejected.is_empty() {
+            say!(v, "{} certificate(s) not usable:", found.rejected.len());
+            for rejected in &found.rejected {
+                let credential = rejected
+                    .dn
+                    .split(',')
+                    .find(|part| part.trim_start().starts_with("o="))
+                    .unwrap_or("?")
+                    .trim();
+                detail!(v, "{credential}: {}", rejected.reason.reason());
+            }
+        }
+
+        if found.matches.is_empty() {
+            let mut why = String::new();
+            for reason in [
+                umbrik_ldap::Rejection::MobileId,
+                umbrik_ldap::Rejection::UnsupportedKey,
+                umbrik_ldap::Rejection::NotAuthentication,
+            ] {
+                let n = found.rejected.iter().filter(|r| r.reason == reason).count();
+                if n > 0 {
+                    why.push_str(&format!("\n  {n} rejected: {}", reason.reason()));
+                }
+            }
+            if why.is_empty() {
+                why.push_str("\n  the directory returned nothing for this id code");
+            }
             bail!(
-                "no usable authentication certificate found for id code {id_code}.\n\
-                 The card may be expired or revoked. Note that Mobile-ID certificates are \
-                 deliberately excluded: their private keys live in the SIM and cannot decrypt \
-                 a CDOC2 container."
+                "no usable authentication certificate for id code {id_code}.{why}\n\
+                 umbrik encrypts to elliptic-curve authentication keys on a physical card. \
+                 Pre-2018 RSA cards (SC02) and Mobile-ID are out of scope. Run with -v to see \
+                 every certificate considered."
             );
         }
-        for found_match in found {
+        for found_match in found.matches {
             let parsed = found_match.recipient;
             check_validity(&parsed, id_code, allow_expired)?;
             let common_name = parsed
