@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use base64::Engine;
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
 use umbrik_core::cert;
 use umbrik_core::container::{DecryptionKey, Recipient};
 use umbrik_core::keylabel;
@@ -22,8 +22,54 @@ use umbrik_core::Limits;
                   Not affiliated with or endorsed by RIA or Cybernetica. Unaudited."
 )]
 struct Cli {
+    /// Explain what is happening. Repeat for more detail (`-vv`).
+    ///
+    /// Diagnostics go to stderr and never include key material, passwords or PINs — see
+    /// `Verbosity`.
+    #[arg(short, long, global = true, action = ArgAction::Count)]
+    verbose: u8,
+
     #[command(subcommand)]
     command: Command,
+}
+
+/// Diagnostic output.
+///
+/// Everything printed here is derived from what an attacker holding the container can already
+/// see — scheme names, labels, byte lengths — or from the local environment, such as a PKCS#11
+/// slot. Nothing derived from key material passes through it.
+///
+/// The type has no method that takes a secret, which is the point: making a leak require adding
+/// a new method is a stronger guarantee than remembering not to call an existing one. The test
+/// `verbose_output_never_contains_secrets` checks the result.
+#[derive(Clone, Copy)]
+struct Verbosity(u8);
+
+impl Verbosity {
+    /// First level: what umbrik is doing and why.
+    fn say(&self, args: std::fmt::Arguments<'_>) {
+        if self.0 >= 1 {
+            eprintln!("  {args}");
+        }
+    }
+
+    /// Second level: byte offsets, lengths, and other detail useful when something is wrong.
+    fn detail(&self, args: std::fmt::Arguments<'_>) {
+        if self.0 >= 2 {
+            eprintln!("    {args}");
+        }
+    }
+
+    fn enabled(&self) -> bool {
+        self.0 >= 1
+    }
+}
+
+macro_rules! say {
+    ($v:expr, $($arg:tt)*) => { $v.say(format_args!($($arg)*)) };
+}
+macro_rules! detail {
+    ($v:expr, $($arg:tt)*) => { $v.detail(format_args!($($arg)*)) };
 }
 
 #[derive(Subcommand)]
@@ -419,6 +465,7 @@ struct EncryptRequest<'a> {
     #[cfg(feature = "ldap")]
     ldap_test: bool,
     inputs: &'a [PathBuf],
+    v: Verbosity,
 }
 
 fn run_encrypt(req: EncryptRequest<'_>) -> Result<()> {
@@ -434,6 +481,7 @@ fn run_encrypt(req: EncryptRequest<'_>) -> Result<()> {
         #[cfg(feature = "ldap")]
         ldap_test,
         inputs,
+        v,
     } = req;
     #[cfg(feature = "ldap")]
     let directories = if ldap_test {
@@ -581,6 +629,29 @@ fn run_encrypt(req: EncryptRequest<'_>) -> Result<()> {
     }
 
     let files = collect_files(inputs)?;
+    if v.enabled() {
+        let total: usize = files.iter().map(|f| f.data.len()).sum();
+        say!(
+            v,
+            "{} file(s), {total} bytes before compression",
+            files.len()
+        );
+        for file in &files {
+            detail!(v, "{:<32} {} bytes", file.name, file.data.len());
+        }
+        say!(v, "{} recipient(s):", recipients.len());
+        for recipient in &recipients {
+            // Recipient is non_exhaustive, so an unrecognised kind still gets a line.
+            let described = match recipient {
+                Recipient::Password { label, .. } => format!("SC06  {}", keylabel::display(label)),
+                Recipient::Symmetric { label, .. } => format!("SC05  {}", keylabel::display(label)),
+                Recipient::PublicKey { label, .. } => format!("SC01  {}", keylabel::display(label)),
+                _ => "unknown recipient kind".to_string(),
+            };
+            detail!(v, "{described}");
+        }
+    }
+
     let mut out =
         std::fs::File::create(file).with_context(|| format!("creating {}", file.display()))?;
     let mut rng = rand::rng();
@@ -589,6 +660,11 @@ fn run_encrypt(req: EncryptRequest<'_>) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("{e}"))
         .with_context(|| format!("encrypting {}", file.display()))?;
 
+    if v.enabled() {
+        if let Ok(meta) = std::fs::metadata(file) {
+            say!(v, "wrote {} bytes", meta.len());
+        }
+    }
     println!("{}", file.display());
     Ok(())
 }
@@ -619,8 +695,39 @@ fn open_provider(
     }
 }
 
+/// Describe a container's structure. Everything here is readable by anyone holding the file.
+fn describe_container(container: &[u8], v: Verbosity) {
+    if !v.enabled() {
+        return;
+    }
+    let Ok(envelope) = umbrik_core::header::Envelope::parse(container) else {
+        say!(v, "container does not parse");
+        return;
+    };
+    detail!(
+        v,
+        "header {} bytes, payload {} bytes (12 nonce + ciphertext + 16 tag)",
+        envelope.header_bytes().len(),
+        envelope.payload().len()
+    );
+    let Ok(header) = envelope.decode_header() else {
+        say!(v, "header does not decode");
+        return;
+    };
+    say!(v, "{} recipient(s):", header.recipients.len());
+    for (i, record) in header.recipients.iter().enumerate() {
+        detail!(
+            v,
+            "#{i} {:<10} {}",
+            record.capsule.scheme(),
+            keylabel::display(&record.key_label)
+        );
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let v = Verbosity(cli.verbose);
     match &cli.command {
         Command::Encrypt {
             file,
@@ -646,6 +753,7 @@ fn main() -> Result<()> {
             #[cfg(feature = "ldap")]
             ldap_test: *ldap_test,
             inputs,
+            v,
         }),
 
         Command::Decrypt {
@@ -670,11 +778,33 @@ fn main() -> Result<()> {
             let keys = decryption_keys(password.as_deref(), secret.as_deref(), provider.as_ref())?;
             let container =
                 std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+            describe_container(&container, v);
+            let limits = limits.to_limits();
+            if v.enabled() {
+                say!(v, "trying {} key candidate(s)", keys.len());
+                detail!(
+                    v,
+                    "limits: ratio {}, entries {}, bytes {}",
+                    limits.max_compression_ratio,
+                    limits.max_entries,
+                    limits.max_uncompressed_bytes
+                );
+            }
+
             let opened = try_keys(&keys, |key| {
-                umbrik_core::decrypt_to_dir(&container, key, &limits.to_limits(), output)
+                umbrik_core::decrypt_to_dir(&container, key, &limits, output)
             })
             .with_context(|| format!("decrypting {}", file.display()))?;
+
+            say!(
+                v,
+                "opened by recipient #{} ({}) {}",
+                opened.recipient.index,
+                opened.recipient.scheme,
+                keylabel::display(&opened.recipient.label)
+            );
             for entry in &opened.entries {
+                detail!(v, "{:<40} {} bytes", entry.name, entry.size);
                 println!("{}", entry.name);
             }
             Ok(())
@@ -754,6 +884,7 @@ fn main() -> Result<()> {
             let keys = decryption_keys(password.as_deref(), secret.as_deref(), provider.as_ref())?;
             let container =
                 std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+            describe_container(&container, v);
             let entries = try_keys(&keys, |key| {
                 umbrik_core::container::list(&container, key, &limits.to_limits())
             })

@@ -66,6 +66,13 @@ Hardware lives in `umbrik-pkcs11`, network in `umbrik-ldap`.
 - **`ErrorCode` discriminants are frozen** across major versions; they cross the C ABI. Add at
   the end, never reorder.
 
+## Diagnostics
+
+`-v`/`-vv` on the CLI prints to stderr through `Verbosity`, which has no method that accepts a
+secret. Keep it that way: making a leak require a new method is a stronger guarantee than
+remembering not to pass the wrong value. `verbose_output_never_contains_secrets` runs the binary
+at `-vv` and greps its output for the password, key and plaintext.
+
 ## Certificates
 
 Validity dates are checked and a certificate outside its window is refused unless

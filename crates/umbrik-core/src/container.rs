@@ -398,7 +398,7 @@ fn open_header(
     envelope: &Envelope<'_>,
     key: &DecryptionKey,
     limits: &Limits,
-) -> Result<(VerifiedHeader, Fmk)> {
+) -> Result<(VerifiedHeader, Fmk, MatchedRecipient)> {
     let header = envelope.decode_header()?;
 
     if header.recipients.len() as u64 > limits.max_recipients {
@@ -411,7 +411,7 @@ fn open_header(
     let mut saw_candidate = false;
     let mut unsupported: Option<Error> = None;
 
-    for record in &header.recipients {
+    for (index, record) in header.recipients.iter().enumerate() {
         match &record.capsule {
             Capsule::RsaPublicKey { .. }
             | Capsule::KeyServer
@@ -438,7 +438,12 @@ fn open_header(
         let fmk = Fmk::unwrap_xor(&record.encrypted_fmk, &kek)?;
         let hhk = fmk.derive_hhk()?;
         if let Ok(verified) = VerifiedHeader::verify(envelope, header.clone(), &hhk) {
-            return Ok((verified, fmk));
+            let matched = MatchedRecipient {
+                index,
+                label: record.key_label.clone(),
+                scheme: record.capsule.scheme(),
+            };
+            return Ok((verified, fmk, matched));
         }
     }
 
@@ -496,11 +501,29 @@ fn decrypt_payload(
     Ok(Zeroizing::new(plaintext))
 }
 
+/// Which recipient record opened a container.
+///
+/// Useful for diagnostics: a container may list several recipients, and knowing which one the
+/// supplied key matched is the difference between "it worked" and "it worked, and here is why".
+/// Carries no secret material — the label and scheme are already visible to anyone holding the
+/// file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchedRecipient {
+    /// Index into the header's recipient list.
+    pub index: usize,
+    /// The label as stored, which may be a machine-readable `data:` string.
+    pub label: String,
+    /// The scheme tag, e.g. `"SC06"`.
+    pub scheme: &'static str,
+}
+
 /// Everything a successful open produces.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Opened {
     pub entries: Vec<ArchiveEntry>,
+    /// The recipient record whose key material opened the container.
+    pub recipient: MatchedRecipient,
 }
 
 /// Decrypt a container and extract its files into `dest`.
@@ -511,10 +534,10 @@ pub fn decrypt_to_dir(
     dest: &Path,
 ) -> Result<Opened> {
     let envelope = Envelope::parse(container)?;
-    let (verified, fmk) = open_header(&envelope, key, limits)?;
+    let (verified, fmk, recipient) = open_header(&envelope, key, limits)?;
     let compressed = decrypt_payload(&envelope, &verified, &fmk)?;
     let entries = payload::unpack_to_dir(&compressed, dest, limits)?;
-    Ok(Opened { entries })
+    Ok(Opened { entries, recipient })
 }
 
 /// Decrypt a container and return its files in memory.
@@ -543,7 +566,7 @@ pub fn decrypt_to_memory(
 /// List a container's entries without writing files.
 pub fn list(container: &[u8], key: &DecryptionKey, limits: &Limits) -> Result<Vec<ArchiveEntry>> {
     let envelope = Envelope::parse(container)?;
-    let (verified, fmk) = open_header(&envelope, key, limits)?;
+    let (verified, fmk, _) = open_header(&envelope, key, limits)?;
     let compressed = decrypt_payload(&envelope, &verified, &fmk)?;
     payload::list(&compressed, limits)
 }
