@@ -187,11 +187,8 @@ jobs:
           gh attestation verify ./umbrik-x86_64-unknown-linux-gnu --repo livenson/umbrik
           ```
 
-          `SHA256SUMS` covers the same files. `umbrik-sbom.json` is a CycloneDX SBOM of the
+          `SHA256SUMS` covers every asset. `umbrik-sbom.json` is a CycloneDX SBOM of the
           resolved dependency graph.
-
-          Python wheels are published to [PyPI](https://pypi.org/p/umbrik) rather than attached
-          here.
 
           ### Which binary
 
@@ -201,8 +198,7 @@ jobs:
           | `*-unknown-linux-musl` | static, no network features |
           | `*-apple-darwin` | macOS |
           | `*-pc-windows-msvc.exe` | Windows |
-
-          umbrik is unaudited and is not affiliated with RIA or Cybernetica.
+          | `*.whl`, `*.tar.gz` | Python 3.10+, one wheel per platform |
           EOF
 
       - name: Create the GitHub release
