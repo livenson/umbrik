@@ -223,3 +223,71 @@ fn verbose_reports_which_recipient_opened_the_container() {
     );
     assert_no_secrets(&output, "verbose decrypt");
 }
+
+/// Labels and entry names are chosen by whoever made the container, and printed on the terminal
+/// of whoever opens it. A control character in either is a terminal escape waiting for a
+/// victim: this label rewrites the window title, the entry name erases the line it is on.
+#[test]
+fn untrusted_text_is_printed_without_control_characters() {
+    let fixture = Fixture::new("escapes");
+    let container = fixture.path("c.cdoc2");
+    let label = "innocent\x1b]0;pwned\x07label";
+    let password = format!("{label}:{PASSWORD}");
+
+    // NTFS refuses control characters in file names, so this half runs only where a file can
+    // carry one.
+    #[cfg(unix)]
+    let hostile_file = {
+        let name = "report\x1b[2K\rmalware.pdf";
+        std::fs::write(fixture.dir.join(name), b"x").unwrap();
+        Some(fixture.path(name))
+    };
+    #[cfg(not(unix))]
+    let hostile_file: Option<String> = None;
+    let inputs: Vec<String> = std::iter::once(fixture.path("secret.txt"))
+        .chain(hostile_file)
+        .collect();
+
+    let mut args = vec!["encrypt", "-f", &container, "--password", &password, "-vv"];
+    args.extend(inputs.iter().map(String::as_str));
+    let encrypt = run(&args);
+
+    let out = fixture.path("out");
+    let outputs = [
+        ("encrypt -vv", encrypt),
+        ("recipients", run(&["recipients", "-f", &container])),
+        (
+            "list -vv",
+            run(&["list", "-f", &container, "--password", &password, "-vv"]),
+        ),
+        (
+            "decrypt -vv",
+            run(&[
+                "decrypt",
+                "-f",
+                &container,
+                "--password",
+                &password,
+                "-vv",
+                "-o",
+                &out,
+            ]),
+        ),
+    ];
+    for (context, output) in outputs {
+        // Newlines and the tab that separates columns are the only control characters the CLI
+        // has any business emitting.
+        let escaped: Vec<char> = output
+            .chars()
+            .filter(|c| c.is_control() && !matches!(c, '\n' | '\t'))
+            .collect();
+        assert!(
+            escaped.is_empty(),
+            "{context}: control characters {escaped:?} reached the terminal\n--- output ---\n{output}"
+        );
+        assert!(
+            output.contains("innocent"),
+            "{context}: the label was dropped rather than sanitised\n--- output ---\n{output}"
+        );
+    }
+}

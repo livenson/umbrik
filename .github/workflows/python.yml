@@ -150,6 +150,8 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+      # To watch release.yml's run.
+      actions: read
     env:
       # This job does not check out the repository, so gh cannot infer which repo it is acting
       # on and every `gh release` call fails regardless of whether the release exists.
@@ -165,27 +167,36 @@ jobs:
         with:
           subject-path: "dist/*"
 
-      # release.yml creates the release from the same tag. Building seven targets takes around
-      # twelve minutes, so wait well past that rather than racing it.
-      - name: Attach to the release
+      # release.yml creates the release from the same tag, then uploads the binaries and
+      # SHA256SUMS. Waiting for the release to *exist* is not enough: it exists a few seconds
+      # before SHA256SUMS does, and a poll landing in that window fails the download below.
+      # Waiting for that workflow's run to finish removes any reasoning about upload order.
+      # Seven targets take around twelve minutes; allow well past that.
+      - name: Wait for the release workflow
         run: |
           for attempt in $(seq 1 60); do
-            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-              gh release upload "$GITHUB_REF_NAME" dist/* --clobber
-
-              # SHA256SUMS is written by release.yml before these wheels exist, so extend it
-              # rather than leaving half the assets uncovered.
-              gh release download "$GITHUB_REF_NAME" -p SHA256SUMS -D sums --clobber
-              (cd dist && sha256sum ./*) | sed 's|\./||' >> sums/SHA256SUMS
-              sort -u -k2 sums/SHA256SUMS -o sums/SHA256SUMS
-              gh release upload "$GITHUB_REF_NAME" sums/SHA256SUMS --clobber
-              exit 0
-            fi
-            echo "waiting for the release to be created (attempt $attempt of 60)"
+            state=$(gh run list --workflow release.yml --branch "$GITHUB_REF_NAME" --event push \
+                      --json status,conclusion --jq '.[0] | "\(.status)/\(.conclusion)"')
+            case "$state" in
+              completed/success) exit 0 ;;
+              completed/*) echo "release workflow finished with $state" >&2; exit 1 ;;
+            esac
+            echo "release workflow is ${state:-not started} (attempt $attempt of 60)"
             sleep 30
           done
-          echo "release $GITHUB_REF_NAME was not created within 30 minutes" >&2
+          echo "release workflow did not finish within 30 minutes" >&2
           exit 1
+
+      - name: Attach to the release
+        run: |
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+          # SHA256SUMS was written by release.yml before these wheels existed, so extend it
+          # rather than leaving half the assets uncovered.
+          gh release download "$GITHUB_REF_NAME" -p SHA256SUMS -D sums --clobber
+          (cd dist && sha256sum ./*) | sed 's|\./||' >> sums/SHA256SUMS
+          sort -u -k2 sums/SHA256SUMS -o sums/SHA256SUMS
+          gh release upload "$GITHUB_REF_NAME" sums/SHA256SUMS --clobber
 
   # Off until a trusted publisher exists. Set the repository variable PUBLISH_TO_PYPI to 'true'
   # to enable it; nothing else needs to change.
