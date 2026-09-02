@@ -17,7 +17,7 @@ permissions: {}
 
 jobs:
   wheels:
-    name: Wheel ${{ matrix.target }}
+    name: Wheel ${{ matrix.os }} ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
