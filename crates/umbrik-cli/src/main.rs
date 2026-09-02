@@ -72,6 +72,25 @@ macro_rules! detail {
     ($v:expr, $($arg:tt)*) => { $v.detail(format_args!($($arg)*)) };
 }
 
+/// Text chosen by someone other than the person reading it, made safe for their terminal.
+///
+/// Key labels, archive entry names and directory entries are written by whoever produced the
+/// container or the directory record, and printed on the screen of whoever opens it. A control
+/// character in one of them is a terminal escape: a label that rewrites the window title, or
+/// an entry name that clears the line and prints a different one in its place. Every such
+/// string goes through here on its way out; nothing in this file prints one directly. The test
+/// `untrusted_text_is_printed_without_control_characters` checks the result.
+fn printable(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .collect()
+}
+
+/// `keylabel::display` for a terminal. The only way this file renders a label.
+fn show_label(label: &str) -> String {
+    printable(&keylabel::display(label))
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Encrypt files into a container.
@@ -575,7 +594,7 @@ fn run_encrypt(req: EncryptRequest<'_>) -> Result<()> {
                     .find(|part| part.trim_start().starts_with("o="))
                     .unwrap_or("?")
                     .trim();
-                detail!(v, "{credential}: {}", rejected.reason.reason());
+                detail!(v, "{}: {}", printable(credential), rejected.reason.reason());
             }
         }
 
@@ -645,7 +664,7 @@ fn run_encrypt(req: EncryptRequest<'_>) -> Result<()> {
             Some(&parsed.sha1),
             file_name.as_deref(),
         );
-        eprintln!("  recipient: {}", keylabel::display(&label));
+        eprintln!("  recipient: {}", show_label(&label));
 
         recipients.push(Recipient::PublicKey {
             label,
@@ -666,15 +685,15 @@ fn run_encrypt(req: EncryptRequest<'_>) -> Result<()> {
             files.len()
         );
         for file in &files {
-            detail!(v, "{:<32} {} bytes", file.name, file.data.len());
+            detail!(v, "{:<32} {} bytes", printable(&file.name), file.data.len());
         }
         say!(v, "{} recipient(s):", recipients.len());
         for recipient in &recipients {
             // Recipient is non_exhaustive, so an unrecognised kind still gets a line.
             let described = match recipient {
-                Recipient::Password { label, .. } => format!("SC06  {}", keylabel::display(label)),
-                Recipient::Symmetric { label, .. } => format!("SC05  {}", keylabel::display(label)),
-                Recipient::PublicKey { label, .. } => format!("SC01  {}", keylabel::display(label)),
+                Recipient::Password { label, .. } => format!("SC06  {}", show_label(label)),
+                Recipient::Symmetric { label, .. } => format!("SC05  {}", show_label(label)),
+                Recipient::PublicKey { label, .. } => format!("SC01  {}", show_label(label)),
                 _ => "unknown recipient kind".to_string(),
             };
             detail!(v, "{described}");
@@ -749,7 +768,7 @@ fn describe_container(container: &[u8], v: Verbosity) {
             v,
             "#{i} {:<10} {}",
             record.capsule.scheme(),
-            keylabel::display(&record.key_label)
+            show_label(&record.key_label)
         );
     }
 }
@@ -830,11 +849,12 @@ fn main() -> Result<()> {
                 "opened by recipient #{} ({}) {}",
                 opened.recipient.index,
                 opened.recipient.scheme,
-                keylabel::display(&opened.recipient.label)
+                show_label(&opened.recipient.label)
             );
             for entry in &opened.entries {
-                detail!(v, "{:<40} {} bytes", entry.name, entry.size);
-                println!("{}", entry.name);
+                let name = printable(&entry.name);
+                detail!(v, "{name:<40} {} bytes", entry.size);
+                println!("{name}");
             }
             Ok(())
         }
@@ -886,7 +906,7 @@ fn main() -> Result<()> {
                 println!(
                     "{}\t{}",
                     recipient.capsule.scheme(),
-                    keylabel::display(&recipient.key_label)
+                    show_label(&recipient.key_label)
                 );
             }
             Ok(())
@@ -919,7 +939,7 @@ fn main() -> Result<()> {
             })
             .with_context(|| format!("reading {}", file.display()))?;
             for entry in &entries {
-                println!("{}\t{}", entry.size, entry.name);
+                println!("{}\t{}", entry.size, printable(&entry.name));
             }
             Ok(())
         }
