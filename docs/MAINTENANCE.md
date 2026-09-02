@@ -38,6 +38,23 @@ vulnerable versions either way.
 A tag is mutable, so pinning to one means running whatever it points at today. Every action is
 pinned to a commit SHA with the version in a trailing comment; Dependabot updates both.
 
+## Python test dependencies are pinned by hash
+
+`bindings/python/requirements-test.txt` lists pytest and everything it pulls in, each with the
+SHA-256 of every published wheel and sdist, and the workflow installs it with
+`--require-hashes`. A version pin alone would still trust the index to serve the right bytes.
+The file is generated from `requirements-test.in`; Dependabot refreshes both the versions and
+the hashes. To regenerate it by hand:
+
+```bash
+cd bindings/python
+uv pip compile --universal --generate-hashes --python-version 3.10 \
+  requirements-test.in -o requirements-test.txt
+```
+
+`--universal` keeps the platform-conditional entries (`colorama` on Windows, `tomli` and
+`exceptiongroup` below 3.11) that a compile on one machine would otherwise drop.
+
 ## flatc
 
 `scripts/install-flatc.sh` installs the `flatc` matching the pinned `flatbuffers` crate, reading
