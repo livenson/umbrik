@@ -128,6 +128,11 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+    env:
+      # This job does not check out the repository, so gh cannot infer which repo it is acting
+      # on and every `gh release` call fails regardless of whether the release exists.
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -138,20 +143,26 @@ jobs:
         with:
           subject-path: "dist/*"
 
-      # release.yml creates the release from the same tag, so wait for it rather than racing.
+      # release.yml creates the release from the same tag. Building seven targets takes around
+      # twelve minutes, so wait well past that rather than racing it.
       - name: Attach to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          for attempt in $(seq 1 30); do
+          for attempt in $(seq 1 60); do
             if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
               gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+              # SHA256SUMS is written by release.yml before these wheels exist, so extend it
+              # rather than leaving half the assets uncovered.
+              gh release download "$GITHUB_REF_NAME" -p SHA256SUMS -D sums --clobber
+              (cd dist && sha256sum ./*) | sed 's|\./||' >> sums/SHA256SUMS
+              sort -u -k2 sums/SHA256SUMS -o sums/SHA256SUMS
+              gh release upload "$GITHUB_REF_NAME" sums/SHA256SUMS --clobber
               exit 0
             fi
-            echo "waiting for the release to be created (attempt $attempt)"
-            sleep 20
+            echo "waiting for the release to be created (attempt $attempt of 60)"
+            sleep 30
           done
-          echo "release $GITHUB_REF_NAME was never created" >&2
+          echo "release $GITHUB_REF_NAME was not created within 30 minutes" >&2
           exit 1
 
   # Off until a trusted publisher exists. Set the repository variable PUBLISH_TO_PYPI to 'true'
