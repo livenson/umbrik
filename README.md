@@ -85,6 +85,26 @@ umbrik decrypt -f secrets.cdoc2 --pkcs11 /opt/homebrew/lib/opensc-pkcs11.so -o .
 
 Omit the password value to be prompted rather than putting it in shell history.
 
+### Seeing what happened
+
+`-v` explains what umbrik is doing; `-vv` adds byte counts and offsets:
+
+```
+$ umbrik decrypt -f secrets.cdoc2 --password "my-label:hunter2" -vv -o ./out
+    header 396 bytes, payload 113 bytes (12 nonce + ciphertext + 16 tag)
+  2 recipient(s):
+    #0 SC06       my-label (pw)
+    #1 SC05       backup (secret)
+  trying 2 key candidate(s)
+    limits: ratio 100, entries 1000, bytes 17179869184
+  opened by recipient #0 (SC06) my-label (pw)
+```
+
+Diagnostics go to stderr, so they do not disturb piped output, and they never include key
+material, passwords, PINs or plaintext — everything printed is either already visible to anyone
+holding the container, or local to your machine. Tests assert this by running the binary at `-vv`
+with a distinctive password and searching the output for it.
+
 ### Encrypting to an id code
 
 `-r <isikukood>` looks up the recipient's **authentication** certificate in the Estonian eID
