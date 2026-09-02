@@ -20,6 +20,6 @@ crate-type = ["cdylib"]
 extension-module = ["pyo3/extension-module"]
 
 [dependencies]
-umbrik-core = { path = "../../crates/umbrik-core", version = "0.1.0" }
+umbrik-core = { path = "../../crates/umbrik-core", version = "0.2.0" }
 pyo3.workspace = true
 rand.workspace = true

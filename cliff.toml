@@ -21,13 +21,14 @@ body = """
 ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
 {% else -%}
 ## Unreleased
-{% endif %}
+{% endif -%}
 {% for group, commits in commits | group_by(attribute="group") %}
-### {{ group | upper_first }}
+### {{ group | striptags | trim | upper_first }}
 {% for commit in commits %}
 - {{ commit.message | split(pat="\n") | first | upper_first }}
 {%- endfor %}
 {% endfor %}
+
 """
 
 footer = """
@@ -43,32 +44,37 @@ split_commits = false
 protect_breaking_commits = true
 
 commit_parsers = [
+  # Breaking changes first, whatever their type. A removal listed under "Added" is worse than
+  # no changelog: the reader takes away the opposite of what happened.
+  { message = "^\\w+(\\([^)]*\\))?!:", group = "<!-- 0 -->Breaking changes" },
+  { body = ".*BREAKING CHANGE", group = "<!-- 0 -->Breaking changes" },
+
   # Conventional Commits.
-  { message = "^feat", group = "Added" },
-  { message = "^fix", group = "Fixed" },
-  { message = "^perf", group = "Changed" },
-  { message = "^refactor", group = "Changed" },
-  { message = "^docs", group = "Documentation" },
-  { message = "^test", group = "Testing" },
+  { message = "^feat", group = "<!-- 1 -->Added" },
+  { message = "^fix", group = "<!-- 2 -->Fixed" },
+  { message = "^perf", group = "<!-- 3 -->Changed" },
+  { message = "^refactor", group = "<!-- 3 -->Changed" },
+  { message = "^docs", group = "<!-- 5 -->Documentation" },
+  { message = "^test", group = "<!-- 6 -->Testing" },
   # Dependency bumps before the build rule, so Dependabot's "build(deps):" lands correctly.
-  { message = "^build\\(deps\\)|^chore\\(deps\\)|^deps", group = "Dependencies" },
+  { message = "^build\\(deps\\)|^chore\\(deps\\)|^deps", group = "<!-- 4 -->Dependencies" },
   # Internal CI plumbing is not a user-visible change. It is in the git log for whoever needs
   # it; a changelog that lists runner-label fixes buries the things people actually read it for.
   { message = "^ci", skip = true },
-  { message = "^build", group = "Build" },
+  { message = "^build", group = "<!-- 7 -->Build" },
   { message = "^chore|^style", skip = true },
 
   # Security first: an advisory or a hardening change should never be buried under "Changed".
-  { message = "(?i)(vulnerab|advisory|CVE-|RUSTSEC|security)", group = "Security" },
+  { message = "(?i)(vulnerab|advisory|CVE-|RUSTSEC|security)", group = "<!-- 2 -->Security" },
 
   # Pre-convention history, classified by what the messages actually say.
-  { message = "(?i)^initial implementation", group = "Added" },
-  { message = "(?i)^(add|adds|added|implement)", group = "Added" },
-  { message = "(?i)^(python bindings|automate maintenance)", group = "Added" },
-  { message = "(?i)^(update|updates|updated|bump) dependencies", group = "Dependencies" },
-  { message = "(?i)^(fix|fixes|fixed|correct)", group = "Fixed" },
-  { message = "(?i)^(ignore|remove|drop)", group = "Changed" },
-  { message = ".*", group = "Changed" },
+  { message = "(?i)^initial implementation", group = "<!-- 1 -->Added" },
+  { message = "(?i)^(add|adds|added|implement)", group = "<!-- 1 -->Added" },
+  { message = "(?i)^(python bindings|automate maintenance)", group = "<!-- 1 -->Added" },
+  { message = "(?i)^(update|updates|updated|bump) dependencies", group = "<!-- 4 -->Dependencies" },
+  { message = "(?i)^(fix|fixes|fixed|correct)", group = "<!-- 2 -->Fixed" },
+  { message = "(?i)^(ignore|remove|drop)", group = "<!-- 3 -->Changed" },
+  { message = ".*", group = "<!-- 3 -->Changed" },
 ]
 
 filter_commits = false
