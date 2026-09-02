@@ -119,28 +119,38 @@ In a genuine emergency, protection can be lifted with
 `gh api -X DELETE repos/livenson/umbrik/branches/main/protection` and restored afterwards. Doing
 so means the next push is unverified, so restore it in the same sitting.
 
-## Blocked: the RustCrypto 0.11 migration
+## Deferred: the RustCrypto 0.11 migration
 
 Eleven crates are a major version behind and move together — `sha2`, `sha1`, `hmac`, `hkdf`,
-`pbkdf2` on the digest 0.11 line, `chacha20poly1305` on aead 0.6, `p256`/`p384` on
-elliptic-curve 0.14, and `rand_core`. **They cannot be taken yet**, and the reason is structural
-rather than effort:
+`pbkdf2` on digest 0.11, `chacha20poly1305` on aead 0.6, `p256`/`p384` on elliptic-curve 0.14,
+and `rand_core`.
+
+They are held back by `rsa`, whose only stable release (0.9.10) sits on the old stack:
 
 | Crate | Requires |
 |---|---|
-| `elliptic-curve` 0.14 (p256/p384 0.14) | `rand_core` **^0.10**, `digest` ^0.11 |
-| `rsa` 0.9.10 — the only stable release | `rand_core` **^0.6**, `digest` ^0.10, `sha2` ^0.10 |
+| `elliptic-curve` 0.14 (p256/p384 0.14) | `rand_core` ^0.10, `digest` ^0.11, `sha2` ^0.11 |
+| `rsa` 0.9.10 | `rand_core` ^0.6, `digest` ^0.10, `sha2` ^0.10 |
 
-`umbrik::encrypt` takes a single `rng` parameter used by both the EC path (SC01) and the RSA path
-(SC02). One value cannot implement two incompatible versions of the same trait, so the set cannot
-be split: taking the EC half would leave SC02 unable to share the RNG.
+`rsa` is used **only for software RSA keys** on SC02 — encrypting to an RSA recipient, and
+decrypting with a PEM private key. RSA on a card does not touch it: PKCS#11 performs RSA-OAEP
+inside the token.
 
-`rsa` 0.10 is at `0.10.0-rc.18`. Shipping a release candidate as the RSA implementation in an
-unaudited cryptographic library is not a trade worth making for dependency freshness.
+This is not impossible. Cargo resolves both stacks side by side, and `umbrik::encrypt`'s single
+`rng` parameter can be bridged between the two `rand_core` versions with a shim, the same
+technique already used to pass `&mut dyn` RNGs into sized-generic APIs.
 
-**Recheck when `rsa` publishes a stable 0.10.** At that point the whole set moves in one change,
-verified by the golden file (which catches any drift in derived output) and interop (which
-catches anything the golden file cannot).
+It is deferred because the cost is poor value:
+
+- two versions each of `rand_core`, `digest` and `sha2` in the graph;
+- a hand-written RNG bridge sitting in the path that generates key material;
+- no functional gain — the current crates work and carry no advisory.
+
+`rsa` 0.10 is at `0.10.0-rc.18`. Waiting for it costs nothing and removes all of the above.
+
+**Recheck when `rsa` publishes a stable 0.10**, or sooner if an advisory lands on any of the
+eleven — `cargo deny` runs on every PR and would catch that. The set then moves in one change,
+verified by the golden file and interop.
 
 ## Always manual
 

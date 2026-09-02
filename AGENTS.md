@@ -95,10 +95,10 @@ stable C ABI. That is why linking is not an issue — never bundle or statically
 Versions are pinned exactly (`=x.y.z`). Dependabot keeps them moving; major bumps are taken by
 hand because only the interop job can judge whether a cryptographic crate's new major is safe.
 
-Do not attempt the RustCrypto 0.11 migration yet — it is blocked upstream by `rsa` having no
-stable release on that line, and the reason is recorded in
-[`docs/MAINTENANCE.md`](docs/MAINTENANCE.md). It is a coupled set of eleven crates that must move
-in one change.
+The RustCrypto 0.11 migration (eleven coupled crates) is deferred, not blocked: it is possible
+today by carrying two dependency stacks and bridging between two `rand_core` versions, but that
+puts duplicated trait crates and a hand-written shim in the key-generation path for no functional
+gain. Wait for a stable `rsa` 0.10 — see [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md).
 
 ## Building
 
