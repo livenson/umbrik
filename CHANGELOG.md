@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/) — see [`VERSIONING.md`](VERSIONING.md).
 Note that a change to the container wire format is breaking even when the API is untouched.
 
+## [0.2.0] - 2026-09-02
+
+
+### Added
+
+- Drop SC02, and complete the RustCrypto 0.11 migration (#15)
+- Add -v/--verbose diagnostics (#16)
+- Explain which directory candidates were rejected, and why (#17)
+
+### Fixed
+
+- Attach wheels to the release, and stop repeating boilerplate in notes (#13)
 ## [0.1.0] - 2026-09-01
 
 
@@ -32,6 +44,10 @@ Note that a change to the container wire format is breaking even when the API is
 - Branch protection is enforced for administrators
 - Add AGENTS.md with the project's working rules (#6)
 - Fix the install instructions and have CI run them (#9)
+
+### Fixed
+
+- Build on Windows, and check every platform on every PR (#12)
 
 ### Security
 
