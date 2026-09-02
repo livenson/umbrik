@@ -9,5 +9,5 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-umbrik-core = { path = "../umbrik-core", version = "0.2.0" }
+umbrik-core = { path = "../umbrik-core", version = "0.2.1" }
 ldap3.workspace = true

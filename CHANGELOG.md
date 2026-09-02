@@ -6,11 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/) — see [`VERSIONING.md`](VERSIONING.md).
 Note that a change to the container wire format is breaking even when the API is untouched.
 
+## [0.2.1] - 2026-09-02
+
+### Fixed
+
+- Strip terminal escapes from labels, entry names and directory records (#21)
+
 ## [0.2.0] - 2026-09-02
 
 ### Breaking changes
 
 - Drop SC02, and complete the RustCrypto 0.11 migration (#15)
+- Release 0.2.0 (#18)
 
 ### Added
 
