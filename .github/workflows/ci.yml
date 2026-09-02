@@ -183,3 +183,10 @@ jobs:
           allow-licenses: >-
             MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-2-Clause,
             BSD-3-Clause, ISC, Unicode-3.0, Zlib, 0BSD, Unlicense
+          # Our own workspace crates. They carry license.workspace = true, so cargo reads them as
+          # MIT, but this action does not: it sees the `version` field on a path dependency, looks
+          # the name up on crates.io, finds nothing there because we do not publish, and reports
+          # "Unknown License". Exempting them silences that on every pull request. Remove these
+          # entries if umbrik is ever published to crates.io, at which point the lookup resolves.
+          allow-dependencies-licenses: >-
+            pkg:cargo/umbrik-core, pkg:cargo/umbrik-ldap, pkg:cargo/umbrik-pkcs11
