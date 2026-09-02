@@ -34,6 +34,27 @@ both directions with DigiDoc4.
 
 ## Install
 
+### Download a release
+
+Every [release](https://github.com/livenson/umbrik/releases/latest) carries prebuilt binaries
+for Linux (glibc and static musl, x86_64 and aarch64), macOS (Intel and Apple silicon) and
+Windows, plus the Python wheels, a `SHA256SUMS` file and a CycloneDX SBOM. No toolchain is
+needed:
+
+```bash
+curl -LO https://github.com/livenson/umbrik/releases/latest/download/umbrik-x86_64-unknown-linux-gnu
+gh attestation verify ./umbrik-x86_64-unknown-linux-gnu --repo livenson/umbrik
+chmod +x umbrik-x86_64-unknown-linux-gnu && mv umbrik-x86_64-unknown-linux-gnu ~/.local/bin/umbrik
+```
+
+Substitute `umbrik-aarch64-apple-darwin`, `umbrik-x86_64-pc-windows-msvc.exe`, or another
+name from the release page; each release lists which file is which. The `musl` builds are
+fully static and have no network features, so they cannot do the eID directory lookup. The
+`gh attestation` line checks that the file was produced by this repository's release workflow
+from the tagged commit; see [Testing](#testing).
+
+### Build from source
+
 Debian/Ubuntu:
 
 <!-- ci:install-linux -->
@@ -135,8 +156,11 @@ form `cdoc2-cli` produces. `umbrik recipients` reads both.
 
 ## Python
 
+The package is not on PyPI yet. Download the wheel for your platform from the
+[release page](https://github.com/livenson/umbrik/releases/latest) and install it:
+
 ```bash
-pip install umbrik
+pip install ./umbrik-*.whl
 ```
 
 ```python

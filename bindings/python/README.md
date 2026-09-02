@@ -8,8 +8,11 @@ encrypted containers, the Estonian `.cdoc2` format.
 
 ## Install
 
+The package is not on PyPI yet. Download the wheel for your platform from the
+[release page](https://github.com/livenson/umbrik/releases/latest) and install it:
+
 ```bash
-pip install umbrik
+pip install ./umbrik-*.whl
 ```
 
 Wheels are built against Python's stable ABI (`abi3`), so a single wheel per platform works on
