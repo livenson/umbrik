@@ -90,6 +90,16 @@ stable C ABI. That is why linking is not an issue — never bundle or statically
 
 `cargo deny check` enforces the dependency side.
 
+## Dependencies
+
+Versions are pinned exactly (`=x.y.z`). Dependabot keeps them moving; major bumps are taken by
+hand because only the interop job can judge whether a cryptographic crate's new major is safe.
+
+Do not attempt the RustCrypto 0.11 migration yet — it is blocked upstream by `rsa` having no
+stable release on that line, and the reason is recorded in
+[`docs/MAINTENANCE.md`](docs/MAINTENANCE.md). It is a coupled set of eleven crates that must move
+in one change.
+
 ## Building
 
 `flatc` must match the `flatbuffers` version pinned in `Cargo.toml`; a mismatch generates code

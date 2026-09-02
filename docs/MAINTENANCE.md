@@ -119,6 +119,29 @@ In a genuine emergency, protection can be lifted with
 `gh api -X DELETE repos/livenson/umbrik/branches/main/protection` and restored afterwards. Doing
 so means the next push is unverified, so restore it in the same sitting.
 
+## Blocked: the RustCrypto 0.11 migration
+
+Eleven crates are a major version behind and move together — `sha2`, `sha1`, `hmac`, `hkdf`,
+`pbkdf2` on the digest 0.11 line, `chacha20poly1305` on aead 0.6, `p256`/`p384` on
+elliptic-curve 0.14, and `rand_core`. **They cannot be taken yet**, and the reason is structural
+rather than effort:
+
+| Crate | Requires |
+|---|---|
+| `elliptic-curve` 0.14 (p256/p384 0.14) | `rand_core` **^0.10**, `digest` ^0.11 |
+| `rsa` 0.9.10 — the only stable release | `rand_core` **^0.6**, `digest` ^0.10, `sha2` ^0.10 |
+
+`umbrik::encrypt` takes a single `rng` parameter used by both the EC path (SC01) and the RSA path
+(SC02). One value cannot implement two incompatible versions of the same trait, so the set cannot
+be split: taking the EC half would leave SC02 unable to share the RNG.
+
+`rsa` 0.10 is at `0.10.0-rc.18`. Shipping a release candidate as the RSA implementation in an
+unaudited cryptographic library is not a trade worth making for dependency freshness.
+
+**Recheck when `rsa` publishes a stable 0.10.** At that point the whole set moves in one change,
+verified by the golden file (which catches any drift in derived output) and interop (which
+catches anything the golden file cannot).
+
 ## Always manual
 
 - **Interop failures after a dependency bump.** No tool decides whether the cryptography changed.
