@@ -1,0 +1,3 @@
+# Test-only dependencies for the Python bindings. Compiled into requirements-test.txt with
+# hashes for every platform; see docs/MAINTENANCE.md.
+pytest

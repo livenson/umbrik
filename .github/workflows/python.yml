@@ -115,7 +115,11 @@ jobs:
         # bash on the Windows runner too: PowerShell does not expand the wheel glob.
         shell: bash
         run: |
-          python -m pip install --upgrade pip pytest
+          # pytest and its dependencies are pinned by hash (Scorecard's Pinned-Dependencies
+          # check), so a compromised index cannot substitute a package into the test run. The
+          # pip shipped with setup-python is used as is: upgrading it would be one more
+          # unpinned download, and installing a wheel needs nothing newer.
+          python -m pip install --require-hashes -r bindings/python/requirements-test.txt
           # The same cp310-abi3 wheel is installed on every version in the matrix.
           python -m pip install dist/*.whl
           python -c "import umbrik; print('umbrik', umbrik.__version__, 'on', __import__('sys').version)"
