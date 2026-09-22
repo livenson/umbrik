@@ -40,7 +40,7 @@ rand_core = "=0.10.1"
 pbkdf2 = { version = "=0.13.0", default-features = false, features = ["hmac"] }
 tar = "=0.4.46"
 flate2 = "=1.1.10"
-clap = { version = "=4.6.6", features = ["derive"] }
+clap = { version = "=4.6.7", features = ["derive"] }
 anyhow = "=1.0.104"
 rpassword = "=7.5.4"
 rand = "=0.10.2"
