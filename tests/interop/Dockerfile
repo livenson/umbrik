@@ -44,7 +44,7 @@ RUN mvn -q -B -pl cdoc2-cli -am package \
       -Dcheckstyle.skip=true -Dspotbugs.skip=true \
  && cp cdoc2-cli/target/cdoc2-cli-*.jar /build/cdoc2-cli.jar
 
-FROM eclipse-temurin:21-jre@sha256:7a65df4b22d2de92d4e04056e884f3b9122d70b21e2847fd66084278bd0ce037
+FROM eclipse-temurin:21-jre@sha256:d7051a45dd955e4d5d1db4d3f4269fe13d1c6dff8cc6b7ef89fc8577b96c1982
 COPY --from=build /build/cdoc2-cli.jar /opt/cdoc2-cli.jar
 # Long filenames and Estonian characters must survive the round trip.
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
