@@ -59,12 +59,14 @@ fn seal(mut tar: Vec<u8>) -> Vec<u8> {
     encoder.finish().unwrap()
 }
 
+/// A directory no other test shares. Tests run in parallel, and a timestamp alone collides on
+/// macOS, whose clock has microsecond resolution: one test's cleanup then deletes the
+/// directory another is extracting into, which surfaces as a spurious `Io` error.
 fn scratch() -> std::path::PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    std::env::temp_dir().join(format!("umbrik-hostile-{nanos}"))
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let seq = NEXT.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("umbrik-hostile-{}-{seq}", std::process::id()))
 }
 
 fn unpack(compressed: &[u8], limits: &Limits) -> umbrik_core::Result<Vec<payload::ArchiveEntry>> {

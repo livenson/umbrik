@@ -587,12 +587,19 @@ impl Drop for ScratchDir {
 }
 
 fn tempdir_in_system() -> Result<ScratchDir> {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+    // The clock alone is not unique: macOS reports microseconds, so two threads can read the
+    // same value. The counter separates them within a process, the pid across processes.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| Error::Internal("system clock before epoch"))?
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("umbrik-{nanos}-{}", std::process::id()));
-    std::fs::create_dir_all(&path).map_err(Error::Io)?;
+    let seq = NEXT.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("umbrik-{nanos}-{}-{seq}", std::process::id()));
+    // `create_dir`, not `create_dir_all`: an existing directory belongs to someone else, and
+    // sharing it would let their `Drop` delete our files.
+    std::fs::create_dir(&path).map_err(Error::Io)?;
     Ok(ScratchDir(path))
 }
