@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/) — see [`VERSIONING.md`](VERSIONING.md).
 Note that a change to the container wire format is breaking even when the API is untouched.
 
+## [0.2.2] - 2026-10-03
+
+### Fixed
+
+- Replace yanked wnaf and patch cryptoki (RUSTSEC-2026-0286) (#26)
+- Make scratch directory names unique within a process (#31)
+
+### Dependencies
+
+- Bump the actions group across 1 directory with 4 updates (#25)
+- Bump the actions group with 4 updates (#28)
+- Bump eclipse-temurin in /tests/interop (#30)
+- Bump thiserror to 2.0.21, clap to 4.6.7 and rand to 0.10.3 (#29)
+
+### Documentation
+
+- Point the README at the release downloads (#24)
+
 ## [0.2.1] - 2026-09-02
 
 ### Fixed
