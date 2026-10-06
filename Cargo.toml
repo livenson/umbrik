@@ -50,7 +50,7 @@ x509-cert = { version = "=0.3.0", features = ["pem"] }
 cryptoki = "=0.12.1"
 # abi3-py310: one wheel per platform covering every supported CPython (3.10 onward),
 # rather than a wheel per interpreter version. See bindings/python/README.md.
-pyo3 = { version = "=0.29.2", features = ["abi3-py310"] }
+pyo3 = { version = "=0.29.3", features = ["abi3-py310"] }
 # native-tls, NOT rustls. esteid.ldap.sk.ee negotiates TLS 1.2 with AES256-GCM-SHA384, a static
 # RSA key-exchange suite with no forward secrecy that rustls deliberately does not implement, so
 # a rustls build cannot connect to it at all — and that directory holds the ID-card certificates.
