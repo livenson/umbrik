@@ -5,6 +5,7 @@
 //! controlled once the AEAD tag has verified, because the tag only proves the sender knew the
 //! CEK, not that they were honest.
 
+use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -120,10 +121,17 @@ fn inflate_ceiling(compressed_len: usize, limits: &Limits) -> u64 {
     ratio_cap.min(limits.max_uncompressed_bytes)
 }
 
-/// Reject anything that could write outside the destination directory.
+/// Reject anything that could write outside the destination directory, or land somewhere the
+/// recipient did not expect.
 ///
 /// Rejected: absolute paths, `..` components, Windows drive prefixes and root components, empty
-/// names. Accepted names are relative and contain only normal components.
+/// names, directory components, and names starting with a dot. Accepted names are a single
+/// normal component.
+///
+/// A sender who can reach the recipient's home directory with `.ssh/authorized_keys` or
+/// `.zshenv` gets code execution, and decrypting into the current directory is the default.
+/// The reference implementation also refuses directory components; it accepts leading dots,
+/// which umbrik does not.
 fn safe_relative_path(name: &str, limits: &Limits) -> Result<PathBuf> {
     if name.is_empty() {
         return Err(Error::UnsafeArchiveEntry("entry name is empty"));
@@ -159,7 +167,57 @@ fn safe_relative_path(name: &str, limits: &Limits) -> Result<PathBuf> {
             "entry name has no usable components",
         ));
     }
+    if safe.components().count() != 1 {
+        return Err(Error::UnsafeArchiveEntry(
+            "entry name contains a directory component",
+        ));
+    }
+    if safe.as_os_str().to_string_lossy().starts_with('.') {
+        return Err(Error::UnsafeArchiveEntry("entry name starts with a dot"));
+    }
     Ok(safe)
+}
+
+/// Refuse a second entry with a name already seen.
+///
+/// On disk the second would replace the first; in memory the caller would get two files under
+/// one name. Either way what the recipient sees depends on order, not on the sender's intent.
+fn check_unique(seen: &mut HashSet<PathBuf>, name: &Path) -> Result<()> {
+    if !seen.insert(name.to_path_buf()) {
+        return Err(Error::UnsafeArchiveEntry("duplicate entry name"));
+    }
+    Ok(())
+}
+
+/// Open `target` for writing, never through a symlink and, unless `allow_overwrite` is set,
+/// never over an existing file.
+///
+/// Returns whether the file is new, so that cleanup after a failure removes only what this
+/// call created and never a file the user already had.
+fn create_output(target: &Path, limits: &Limits) -> Result<(std::fs::File, bool)> {
+    match std::fs::symlink_metadata(target) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(Error::UnsafeArchiveEntry(
+            "entry would be written through an existing symlink",
+        )),
+        Ok(_) if !limits.allow_overwrite => Err(Error::Io(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("refusing to overwrite {}", target.display()),
+        ))),
+        Ok(_) => std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(target)
+            .map(|file| (file, false))
+            .map_err(Error::Io),
+        // `create_new` rather than `create`: a file appearing since the check is refused too.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(target)
+            .map(|file| (file, true))
+            .map_err(Error::Io),
+        Err(err) => Err(Error::Io(err)),
+    }
 }
 
 fn check_entry_type(entry_type: tar::EntryType, limits: &Limits) -> Result<()> {
@@ -209,6 +267,7 @@ pub fn list(compressed: &[u8], limits: &Limits) -> Result<Vec<ArchiveEntry>> {
     let mut archive = tar::Archive::new(reader);
 
     let mut out = Vec::new();
+    let mut seen = HashSet::new();
     let entries = archive
         .entries()
         .map_err(|e| classify_unpack_error(e, compressed.len(), limits))?;
@@ -221,6 +280,7 @@ pub fn list(compressed: &[u8], limits: &Limits) -> Result<Vec<ArchiveEntry>> {
         let path = entry.path().map_err(Error::Io)?;
         // Validate even when only listing: a caller may act on these names.
         let relative = safe_relative_path(&path.to_string_lossy(), limits)?;
+        check_unique(&mut seen, &relative)?;
         out.push(ArchiveEntry {
             name: relative.to_string_lossy().into_owned(),
             size: entry.header().size().map_err(Error::Io)?,
@@ -239,7 +299,9 @@ pub fn list(compressed: &[u8], limits: &Limits) -> Result<Vec<ArchiveEntry>> {
 /// Authenticated does not mean trustworthy: the sender chose these paths. Every entry is still
 /// checked against [`Limits`].
 ///
-/// On failure, files created by this call are removed.
+/// Existing files are never replaced unless [`Limits::allow_overwrite`] is set, and never
+/// written through a symlink. On failure, files created by this call are removed; a file that
+/// existed before is left alone.
 pub fn unpack_to_dir(compressed: &[u8], dest: &Path, limits: &Limits) -> Result<Vec<ArchiveEntry>> {
     std::fs::create_dir_all(dest).map_err(Error::Io)?;
 
@@ -269,6 +331,7 @@ fn unpack_inner(
     let mut archive = tar::Archive::new(reader);
 
     let mut out = Vec::new();
+    let mut seen = HashSet::new();
     let entries = archive
         .entries()
         .map_err(|e| classify_unpack_error(e, compressed.len(), limits))?;
@@ -283,6 +346,7 @@ fn unpack_inner(
 
         let raw_path = entry.path().map_err(Error::Io)?;
         let relative = safe_relative_path(&raw_path.to_string_lossy(), limits)?;
+        check_unique(&mut seen, &relative)?;
         let name = relative.to_string_lossy().into_owned();
         let target = dest.join(&relative);
 
@@ -295,8 +359,10 @@ fn unpack_inner(
         }
 
         let size = entry.header().size().map_err(Error::Io)?;
-        let mut file = std::fs::File::create(&target).map_err(Error::Io)?;
-        created.push(target.clone());
+        let (mut file, is_new) = create_output(&target, limits)?;
+        if is_new {
+            created.push(target.clone());
+        }
         std::io::copy(&mut entry, &mut file)
             .map_err(|e| classify_unpack_error(e, compressed.len(), limits))?;
 
@@ -319,6 +385,7 @@ pub fn unpack_to_memory(compressed: &[u8], limits: &Limits) -> Result<Vec<Payloa
     let mut archive = tar::Archive::new(reader);
 
     let mut out = Vec::new();
+    let mut seen = HashSet::new();
     let entries = archive
         .entries()
         .map_err(|e| classify_unpack_error(e, compressed.len(), limits))?;
@@ -333,6 +400,7 @@ pub fn unpack_to_memory(compressed: &[u8], limits: &Limits) -> Result<Vec<Payloa
 
         let raw_path = entry.path().map_err(Error::Io)?;
         let relative = safe_relative_path(&raw_path.to_string_lossy(), limits)?;
+        check_unique(&mut seen, &relative)?;
         let name = relative.to_string_lossy().into_owned();
 
         if entry_type.is_dir() {

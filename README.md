@@ -223,6 +223,13 @@ Extraction enforces `Limits` — compression ratio, entry count, uncompressed si
 count, and a cumulative PBKDF2 iteration budget — and rejects path traversal, absolute paths and
 symlinks. These live inside the reader rather than being delegated to callers.
 
+Entry names are single file names: no directories, no leading dot, no duplicates. The sender
+chooses them, and `decrypt` writes to the current directory unless given `-o`, so a container
+could otherwise drop `~/.ssh/authorized_keys` or `~/.zshenv`. Existing files are never replaced
+unless `--force` is given, and never written through a symlink. The reference implementation
+also refuses directories and overwriting; it accepts a leading dot, which umbrik does not, so
+umbrik also refuses to encrypt a file whose name starts with one.
+
 Exceeding a limit reports the actual figures and which setting governs them;
 `--max-compression-ratio` and friends raise them for a container you trust. The ratio default is
 100 rather than the reference implementation's 10, which rejects ordinary log files.

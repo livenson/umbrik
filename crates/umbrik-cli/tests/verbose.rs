@@ -107,7 +107,9 @@ fn verbose_output_never_contains_secrets() {
             &format!("pw-label:{PASSWORD}"),
             flag,
             "-o",
-            &fixture.path("out"),
+            // One directory per run: decrypt refuses to overwrite, and the second run would
+            // then check an error message instead of a successful decryption.
+            &fixture.path(&format!("out{flag}")),
         ]);
         assert_no_secrets(&decrypt, &format!("decrypt {flag}"));
 

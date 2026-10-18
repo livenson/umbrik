@@ -159,6 +159,12 @@ enum Command {
         /// Output directory.
         #[arg(short = 'o', long = "output", default_value = ".")]
         output: PathBuf,
+        /// Replace files that already exist in the output directory.
+        ///
+        /// Off by default: the sender chooses the file names, so a container could otherwise
+        /// replace anything in the directory it is decrypted into.
+        #[arg(long = "force")]
+        force: bool,
     },
     /// List the keys a token or key file offers.
     ///
@@ -435,9 +441,25 @@ fn try_keys<T>(
         }
     }
     match first_error {
-        Some(err) => Err(anyhow::anyhow!("{err}")),
+        Some(err) => Err(anyhow::anyhow!("{}", describe(&err))),
         None => bail!("no key material supplied"),
     }
+}
+
+/// An error and its causes on one line, safe for a terminal.
+///
+/// The causes matter: `Error::Io` alone reads "io error", and its source says which file and
+/// why. They can also carry an archive entry name, which the sender chose, so the whole line
+/// goes through `printable`.
+fn describe(err: &dyn std::error::Error) -> String {
+    let mut text = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    printable(&text)
 }
 
 /// Build the key material to try, in order. The provider is borrowed, so it must outlive this.
@@ -815,6 +837,7 @@ fn main() -> Result<()> {
             pin_file,
             limits,
             output,
+            force,
         } => {
             let provider = open_provider(
                 key.as_deref(),
@@ -827,7 +850,7 @@ fn main() -> Result<()> {
             let container =
                 std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
             describe_container(&container, v);
-            let limits = limits.to_limits();
+            let limits = limits.to_limits().with_overwrite_allowed(*force);
             if v.enabled() {
                 say!(v, "trying {} key candidate(s)", keys.len());
                 detail!(
