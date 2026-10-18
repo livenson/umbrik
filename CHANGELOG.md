@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/) — see [`VERSIONING.md`](VERSIONING.md).
 Note that a change to the container wire format is breaking even when the API is untouched.
 
+## [0.3.0] - 2026-10-18
+
+### Breaking changes
+
+- `decrypt` no longer lets a container's sender choose where files land or what they replace (#39):
+  - Entry names must be a single file name: directory components, a leading dot and duplicate names are refused. Previously a container decrypted in a home directory could write `~/.ssh/authorized_keys` or `~/.zshenv`.
+  - Existing files are not replaced unless `--force` is given (`Limits::allow_overwrite` in the library), and never through a symlink.
+  - A failed extraction removes only files it created; it used to delete files that existed before.
+  - Encrypting a file whose name starts with a dot is refused, so umbrik never writes a container it would not open.
+
 ## [0.2.3] - 2026-10-18
 
 ### Fixed
