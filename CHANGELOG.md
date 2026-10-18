@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/) — see [`VERSIONING.md`](VERSIONING.md).
 Note that a change to the container wire format is breaking even when the API is untouched.
 
+## [0.2.3] - 2026-10-18
+
+### Fixed
+
+- `decrypt_to_memory` and the Python `umbrik.decrypt` no longer extract plaintext into a world-readable temporary directory; on a shared `/tmp`, other local users could read decrypted files (#37)
+
+### Dependencies
+
+- Bump zeroize to 1.9.1 and pyo3 to 0.29.3 (#35)
+- Bump codeql-action to 4.38.3, upload-artifact to 7.0.2, download-artifact to 8.0.2 and scorecard-action to 2.5.0 (#36)
+
 ## [0.2.2] - 2026-10-03
 
 ### Fixed
