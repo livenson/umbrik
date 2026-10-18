@@ -69,11 +69,32 @@ fn scratch() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("umbrik-hostile-{}-{seq}", std::process::id()))
 }
 
+/// Unpack to a directory and to memory, and require both paths to reach the same verdict.
+///
+/// They share no extraction loop, so every hostile input below has to be refused by each.
 fn unpack(compressed: &[u8], limits: &Limits) -> umbrik_core::Result<Vec<payload::ArchiveEntry>> {
     let dir = scratch();
-    let result = payload::unpack_to_dir(compressed, &dir, limits);
+    let on_disk = payload::unpack_to_dir(compressed, &dir, limits);
     let _ = std::fs::remove_dir_all(&dir);
-    result
+
+    let in_memory = payload::unpack_to_memory(compressed, limits);
+    match (&on_disk, &in_memory) {
+        (Ok(entries), Ok(files)) => {
+            let described: Vec<(&str, u64)> = files
+                .iter()
+                .map(|f| (f.name.as_str(), f.data.len() as u64))
+                .collect();
+            let expected: Vec<(&str, u64)> =
+                entries.iter().map(|e| (e.name.as_str(), e.size)).collect();
+            assert_eq!(
+                described, expected,
+                "in-memory unpack disagrees with on-disk"
+            );
+        }
+        (Err(a), Err(b)) => assert_eq!(a.code(), b.code(), "{a} vs {b}"),
+        _ => panic!("on-disk {on_disk:?} but in-memory {in_memory:?}"),
+    }
+    on_disk
 }
 
 #[test]
