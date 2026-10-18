@@ -541,26 +541,18 @@ pub fn decrypt_to_dir(
 }
 
 /// Decrypt a container and return its files in memory.
+///
+/// Nothing is written to disk: a scratch directory would expose the plaintext to every user who
+/// can read the system temporary directory.
 pub fn decrypt_to_memory(
     container: &[u8],
     key: &DecryptionKey,
     limits: &Limits,
 ) -> Result<Vec<PayloadFile>> {
-    let dir = tempdir_in_system()?;
-    let result = (|| {
-        let opened = decrypt_to_dir(container, key, limits, dir.as_path())?;
-        let mut files = Vec::with_capacity(opened.entries.len());
-        for entry in opened.entries {
-            let path = dir.as_path().join(&entry.name);
-            files.push(PayloadFile {
-                name: entry.name,
-                data: std::fs::read(&path).map_err(Error::Io)?,
-            });
-        }
-        Ok(files)
-    })();
-    let _ = std::fs::remove_dir_all(dir.as_path());
-    result
+    let envelope = Envelope::parse(container)?;
+    let (verified, fmk, _) = open_header(&envelope, key, limits)?;
+    let compressed = decrypt_payload(&envelope, &verified, &fmk)?;
+    payload::unpack_to_memory(&compressed, limits)
 }
 
 /// List a container's entries without writing files.
@@ -569,37 +561,4 @@ pub fn list(container: &[u8], key: &DecryptionKey, limits: &Limits) -> Result<Ve
     let (verified, fmk, _) = open_header(&envelope, key, limits)?;
     let compressed = decrypt_payload(&envelope, &verified, &fmk)?;
     payload::list(&compressed, limits)
-}
-
-/// A scratch directory removed on drop.
-struct ScratchDir(std::path::PathBuf);
-
-impl ScratchDir {
-    fn as_path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for ScratchDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn tempdir_in_system() -> Result<ScratchDir> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    // The clock alone is not unique: macOS reports microseconds, so two threads can read the
-    // same value. The counter separates them within a process, the pid across processes.
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| Error::Internal("system clock before epoch"))?
-        .as_nanos();
-    let seq = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("umbrik-{nanos}-{}-{seq}", std::process::id()));
-    // `create_dir`, not `create_dir_all`: an existing directory belongs to someone else, and
-    // sharing it would let their `Drop` delete our files.
-    std::fs::create_dir(&path).map_err(Error::Io)?;
-    Ok(ScratchDir(path))
 }

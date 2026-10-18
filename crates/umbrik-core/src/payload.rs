@@ -304,3 +304,47 @@ fn unpack_inner(
     }
     Ok(out)
 }
+
+/// Unpack into memory, writing nothing to disk.
+///
+/// The same checks as [`unpack_to_dir`] apply, names included: nothing is written here, but a
+/// caller may write the files out under these names. Directory entries carry no data and are
+/// skipped, as they are when unpacking to a directory.
+pub fn unpack_to_memory(compressed: &[u8], limits: &Limits) -> Result<Vec<PayloadFile>> {
+    let reader = LimitedReader {
+        inner: ZlibDecoder::new(compressed),
+        read: 0,
+        max: inflate_ceiling(compressed.len(), limits),
+    };
+    let mut archive = tar::Archive::new(reader);
+
+    let mut out = Vec::new();
+    let entries = archive
+        .entries()
+        .map_err(|e| classify_unpack_error(e, compressed.len(), limits))?;
+    for entry in entries {
+        let mut entry = entry.map_err(|e| classify_unpack_error(e, compressed.len(), limits))?;
+        if out.len() as u64 >= limits.max_entries {
+            return Err(Error::LimitExceeded("too many archive entries".to_string()));
+        }
+
+        let entry_type = entry.header().entry_type();
+        check_entry_type(entry_type, limits)?;
+
+        let raw_path = entry.path().map_err(Error::Io)?;
+        let relative = safe_relative_path(&raw_path.to_string_lossy(), limits)?;
+        let name = relative.to_string_lossy().into_owned();
+
+        if entry_type.is_dir() {
+            continue;
+        }
+        // Not `with_capacity(size)`: the size is the sender's claim, and `LimitedReader` only
+        // bounds what is actually inflated.
+        let mut data = Vec::new();
+        entry
+            .read_to_end(&mut data)
+            .map_err(|e| classify_unpack_error(e, compressed.len(), limits))?;
+        out.push(PayloadFile { name, data });
+    }
+    Ok(out)
+}
