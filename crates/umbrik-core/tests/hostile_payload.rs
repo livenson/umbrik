@@ -162,6 +162,139 @@ fn traversal_writes_nothing_outside_destination() {
 }
 
 #[test]
+fn rejects_directory_components() {
+    // The reference implementation refuses these too. Allowing them is what lets a container
+    // reach `~/.ssh/authorized_keys` when decrypted in the home directory.
+    for name in [
+        "docs/letter.txt",
+        "a/b/c.txt",
+        ".ssh/authorized_keys",
+        "./nested/x.txt",
+    ] {
+        let compressed = seal(tar_entry(name, b"pwned", b'0'));
+        let err = unpack(&compressed, &Limits::default()).unwrap_err();
+        assert_eq!(
+            err.code(),
+            ErrorCode::UnsafeArchiveEntry,
+            "nested name {name:?} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn rejects_dot_prefixed_names() {
+    // A new `~/.zshenv` runs at every shell start, and needs no existing file to replace.
+    for name in [".zshenv", ".bashrc", "./.profile", ".."] {
+        let compressed = seal(tar_entry(name, b"pwned", b'0'));
+        let err = unpack(&compressed, &Limits::default()).unwrap_err();
+        assert_eq!(
+            err.code(),
+            ErrorCode::UnsafeArchiveEntry,
+            "dotfile {name:?} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn accepts_dots_inside_a_name() {
+    let compressed = seal(tar_entry("report.v2.pdf", b"ok", b'0'));
+    let entries = unpack(&compressed, &Limits::default()).unwrap();
+    assert_eq!(entries[0].name, "report.v2.pdf");
+}
+
+#[test]
+fn rejects_duplicate_names() {
+    let mut tar = tar_entry("letter.txt", b"first", b'0');
+    tar.extend_from_slice(&tar_entry("./letter.txt", b"second", b'0'));
+    let err = unpack(&seal(tar), &Limits::default()).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::UnsafeArchiveEntry);
+}
+
+#[test]
+fn refuses_to_overwrite_an_existing_file() {
+    let dir = scratch();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("letter.txt"), b"original").unwrap();
+
+    let compressed = seal(tar_entry("letter.txt", b"replaced", b'0'));
+    let err = payload::unpack_to_dir(&compressed, &dir, &Limits::default()).unwrap_err();
+    let kept = std::fs::read(dir.join("letter.txt")).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert_eq!(err.code(), ErrorCode::Io);
+    let cause = std::error::Error::source(&err).map(ToString::to_string);
+    assert!(
+        cause
+            .as_deref()
+            .unwrap_or("")
+            .contains("refusing to overwrite"),
+        "{err}: {cause:?}"
+    );
+    assert_eq!(kept, b"original");
+}
+
+#[test]
+fn overwrites_when_allowed() {
+    let dir = scratch();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("letter.txt"),
+        b"original, and longer than the new one",
+    )
+    .unwrap();
+
+    let compressed = seal(tar_entry("letter.txt", b"replaced", b'0'));
+    let limits = Limits::default().with_overwrite_allowed(true);
+    payload::unpack_to_dir(&compressed, &dir, &limits).unwrap();
+    let written = std::fs::read(dir.join("letter.txt")).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert_eq!(written, b"replaced");
+}
+
+#[test]
+fn failed_unpack_removes_only_files_it_created() {
+    // Cleanup used to remove every path it had written to, including a file the user already
+    // had: a container could truncate a file and then fail on purpose to delete it.
+    let dir = scratch();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("existing.txt"), b"original").unwrap();
+
+    let mut tar = tar_entry("existing.txt", b"replaced", b'0');
+    tar.extend_from_slice(&tar_entry("new.txt", b"new", b'0'));
+    tar.extend_from_slice(&tar_entry("../escape.txt", b"fail here", b'0'));
+    let limits = Limits::default().with_overwrite_allowed(true);
+    let err = payload::unpack_to_dir(&seal(tar), &dir, &limits).unwrap_err();
+    let existing_survives = dir.join("existing.txt").exists();
+    let new_removed = !dir.join("new.txt").exists();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert_eq!(err.code(), ErrorCode::UnsafeArchiveEntry);
+    assert!(existing_survives, "a file that existed before was deleted");
+    assert!(new_removed, "a file this call created was left behind");
+}
+
+#[cfg(unix)]
+#[test]
+fn never_writes_through_an_existing_symlink() {
+    let dir = scratch();
+    std::fs::create_dir_all(dir.join("out")).unwrap();
+    let outside = dir.join("outside.txt");
+    std::fs::write(&outside, b"original").unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("out").join("letter.txt")).unwrap();
+
+    let compressed = seal(tar_entry("letter.txt", b"replaced", b'0'));
+    // Even with overwriting allowed: the user agreed to replace files, not to follow links.
+    let limits = Limits::default().with_overwrite_allowed(true);
+    let err = payload::unpack_to_dir(&compressed, &dir.join("out"), &limits).unwrap_err();
+    let kept = std::fs::read(&outside).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert_eq!(err.code(), ErrorCode::UnsafeArchiveEntry);
+    assert_eq!(kept, b"original");
+}
+
+#[test]
 fn rejects_symlink_entries_by_default() {
     // typeflag '2' is a symbolic link.
     let compressed = seal(tar_entry("link", b"", b'2'));

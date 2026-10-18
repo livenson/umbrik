@@ -19,6 +19,9 @@ pub struct Limits {
     pub allow_symlinks: bool,
     /// Absolute paths in tar entry names. Off by default.
     pub allow_absolute_paths: bool,
+    /// Replacing files that already exist in the output directory. Off by default: the sender
+    /// chooses the names, and decrypting into a directory should not destroy what is there.
+    pub allow_overwrite: bool,
     /// Maximum recipient records considered when opening a container.
     ///
     /// Each candidate record costs a KEK derivation, and for SC06 that is a full PBKDF2 run.
@@ -83,6 +86,12 @@ impl Limits {
         self
     }
 
+    /// Permit replacing existing files when unpacking to a directory. Off by default.
+    pub fn with_overwrite_allowed(mut self, allow: bool) -> Self {
+        self.allow_overwrite = allow;
+        self
+    }
+
     /// Set the maximum number of recipient records considered when opening a container.
     pub fn with_max_recipients(mut self, recipients: u64) -> Self {
         self.max_recipients = recipients;
@@ -104,6 +113,7 @@ impl Default for Limits {
             max_uncompressed_bytes: Self::DEFAULT_MAX_UNCOMPRESSED_BYTES,
             allow_symlinks: false,
             allow_absolute_paths: false,
+            allow_overwrite: false,
             max_recipients: Self::DEFAULT_MAX_RECIPIENTS,
             max_total_kdf_iterations: Self::DEFAULT_MAX_TOTAL_KDF_ITERATIONS,
         }
