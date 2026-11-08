@@ -4,7 +4,7 @@
 # upstream cannot distinguish "umbrik regressed" from "upstream changed".
 # Pinned by digest, like the repositories below: an interop job that silently follows a
 # moving base image cannot distinguish "umbrik regressed" from "the image changed".
-FROM maven:3.9-eclipse-temurin-21@sha256:8f6ac126f7810bb5549c4cd122d2bf0e9cda5bdeb0838aa928f09e779fd8bef8 AS build
+FROM maven:3.9-eclipse-temurin-26@sha256:b2c1ad85954592f9928e84327c65201f308ad9b5d8ed7d5b823717c97bf23fbb AS build
 
 ARG OPENAPI_REPO=https://github.com/open-eid/cdoc2-openapi.git
 ARG OPENAPI_REF=6dc1694261214d0e9ccf30de93e942e8e6291568
