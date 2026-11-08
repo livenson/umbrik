@@ -9,7 +9,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-umbrik-core = { path = "../umbrik-core", version = "0.3.0" }
+umbrik-core = { path = "../umbrik-core", version = "0.3.1" }
 cryptoki.workspace = true
 zeroize.workspace = true
 

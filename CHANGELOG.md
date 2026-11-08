@@ -6,26 +6,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/) — see [`VERSIONING.md`](VERSIONING.md).
 Note that a change to the container wire format is breaking even when the API is untouched.
 
+## [0.3.1] - 2026-11-08
+
+### Fixed
+
+- Update crypto-bigint, ctutils, tokio for RUSTSEC-2026-0385/0386/0387 (#46)
+
+### Dependencies
+
+- Bump maven in /tests/interop (#44)
+- Bump pytest from 9.1.1 to 9.2.0 in /bindings/python (#45)
+- Bump sha2 (#41)
+- Bump the actions group across 1 directory with 6 updates (#43)
+
 ## [0.3.0] - 2026-10-18
 
 ### Breaking changes
 
-- `decrypt` no longer lets a container's sender choose where files land or what they replace (#39):
-  - Entry names must be a single file name: directory components, a leading dot and duplicate names are refused. Previously a container decrypted in a home directory could write `~/.ssh/authorized_keys` or `~/.zshenv`.
-  - Existing files are not replaced unless `--force` is given (`Limits::allow_overwrite` in the library), and never through a symlink.
-  - A failed extraction removes only files it created; it used to delete files that existed before.
-  - Encrypting a file whose name starts with a dot is refused, so umbrik never writes a container it would not open.
+- Refuse to overwrite files or write outside flat names on decrypt (#39)
 
 ## [0.2.3] - 2026-10-18
 
 ### Fixed
 
-- `decrypt_to_memory` and the Python `umbrik.decrypt` no longer extract plaintext into a world-readable temporary directory; on a shared `/tmp`, other local users could read decrypted files (#37)
+- Decrypt to memory without a world-readable scratch directory (#37)
 
 ### Dependencies
 
-- Bump zeroize to 1.9.1 and pyo3 to 0.29.3 (#35)
-- Bump codeql-action to 4.38.3, upload-artifact to 7.0.2, download-artifact to 8.0.2 and scorecard-action to 2.5.0 (#36)
+- Bump the rust-dependencies group across 1 directory with 2 updates (#35)
+- Bump the actions group across 1 directory with 7 updates (#36)
 
 ## [0.2.2] - 2026-10-03
 
@@ -39,7 +48,7 @@ Note that a change to the container wire format is breaking even when the API is
 - Bump the actions group across 1 directory with 4 updates (#25)
 - Bump the actions group with 4 updates (#28)
 - Bump eclipse-temurin in /tests/interop (#30)
-- Bump thiserror to 2.0.21, clap to 4.6.7 and rand to 0.10.3 (#29)
+- Bump the rust-dependencies group across 1 directory with 3 updates (#29)
 
 ### Documentation
 
