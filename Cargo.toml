@@ -29,7 +29,7 @@ authors = ["Ilja Livenson"]
 [workspace.dependencies]
 flatbuffers = "=25.12.19"
 hkdf = "=0.13.0"
-sha2 = "=0.11.0"
+sha2 = "=0.11.1"
 sha1 = "=0.11.0"
 hmac = "=0.13.0"
 chacha20poly1305 = "=0.11.0"
