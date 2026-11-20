@@ -11,7 +11,8 @@
 //! # One provider per process
 //!
 //! PKCS#11 modules are initialised process-wide: `C_Initialize` may be called once, and
-//! `C_Finalize` tears down state shared by every handle in the process. Creating a second
+//! `C_Finalize` tears down state shared by every handle in the process. A provider calls
+//! `C_Initialize` when opened and `C_Finalize` when dropped. Creating a second
 //! [`Pkcs11KeyProvider`] for the same module while another is alive — or dropping one while
 //! another is in use — can crash the module, not merely return an error.
 //!
@@ -91,6 +92,22 @@ impl std::fmt::Debug for Pkcs11KeyProvider {
         f.debug_struct("Pkcs11KeyProvider")
             .field("keys", &self.keys.len())
             .finish()
+    }
+}
+
+/// Pairs the `C_Initialize` in [`Pkcs11KeyProvider::open`] with a `C_Finalize`.
+///
+/// `cryptoki` does not finalize on drop; it only `dlclose`s the module. Whether that resets the
+/// module is up to the dynamic loader: a module that stays mapped after `dlclose` (SoftHSM 2.6.1
+/// on Ubuntu 26.04, for one) keeps its initialised state, and the next provider's
+/// `C_Initialize` fails with `CKR_CRYPTOKI_ALREADY_INITIALIZED`. Finalizing explicitly makes
+/// the lifecycle the one the PKCS#11 specification requires instead of a loader accident.
+///
+/// Every [`Session`] is opened and closed within a single method, so none outlives this.
+impl Drop for Pkcs11KeyProvider {
+    fn drop(&mut self) {
+        // Nothing can be done about a failure here, and C_Finalize reports nothing secret.
+        let _ = self.context.clone().finalize();
     }
 }
 
