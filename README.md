@@ -55,6 +55,8 @@ from the tagged commit; see [Testing](#testing).
 
 ### Build from source
 
+Requires Rust 1.88 or newer.
+
 Debian/Ubuntu:
 
 <!-- ci:install-linux -->
