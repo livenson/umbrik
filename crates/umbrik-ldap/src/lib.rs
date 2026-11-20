@@ -28,7 +28,7 @@
 //! your threat model, fetch and validate the certificate yourself and use
 //! [`umbrik_core::cert::from_der`] directly.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use ldap3::{LdapConn, LdapConnSettings, Scope, SearchEntry};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -293,21 +293,38 @@ fn tls_error(e: impl std::fmt::Display) -> Error {
     Error::Transport(format!("TLS setup failed: {e}"))
 }
 
-/// The rustls configuration for every directory connection.
+/// The rustls configuration for every directory connection, built once per process.
 ///
+/// Loading the system trust store means reading and parsing every root certificate (on macOS, a
+/// keychain query), so it is not repeated for each directory and each lookup. Only a successful
+/// build is kept: after a failure the next lookup tries again. A process that runs for a long
+/// time keeps the roots it started with.
+fn tls_config() -> Result<Arc<ClientConfig>, Error> {
+    static CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
+    if let Some(config) = CONFIG.get() {
+        return Ok(config.clone());
+    }
+    let config = build_tls_config()?;
+    Ok(CONFIG.get_or_init(|| config).clone())
+}
+
 /// Built here rather than left to ldap3, whose default discards the *entire* system root store
 /// if any single certificate in it fails to load. Here an unreadable certificate is skipped, and
 /// only an empty store is an error.
-fn tls_config() -> Result<Arc<ClientConfig>, Error> {
+fn build_tls_config() -> Result<Arc<ClientConfig>, Error> {
     let loaded = rustls_native_certs::load_native_certs();
     let mut roots = RootCertStore::empty();
     roots.add_parsable_certificates(loaded.certs);
     if roots.is_empty() {
-        let reasons: Vec<String> = loaded.errors.iter().map(ToString::to_string).collect();
-        return Err(tls_error(format!(
-            "no trusted root certificates found in the system store ({})",
-            reasons.join("; ")
-        )));
+        let mut message = "no trusted root certificates found in the system store; install the \
+                           CA certificates package (ca-certificates on Debian and Ubuntu) or set \
+                           SSL_CERT_FILE to a PEM bundle"
+            .to_string();
+        if !loaded.errors.is_empty() {
+            let reasons: Vec<String> = loaded.errors.iter().map(ToString::to_string).collect();
+            message.push_str(&format!(" (errors while loading: {})", reasons.join("; ")));
+        }
+        return Err(tls_error(message));
     }
 
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -696,6 +713,17 @@ mod tests {
 
     #[test]
     fn tls_config_builds_from_the_system_store() {
-        tls_config().expect("system trust store should yield a usable config");
+        // This depends on the machine, not the code: a minimal container or a build sandbox may
+        // have no CA bundle at all. Skip there rather than fail.
+        if rustls_native_certs::load_native_certs().certs.is_empty() {
+            eprintln!("skipping: no system root certificates on this machine");
+            return;
+        }
+        let first = tls_config().expect("system trust store should yield a usable config");
+        let second = tls_config().expect("cached config");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "the config is built once per process"
+        );
     }
 }
