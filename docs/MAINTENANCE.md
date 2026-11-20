@@ -9,7 +9,7 @@ below is what keeps those pins from going stale.
 
 | What | When | Catches |
 |---|---|---|
-| CI | push, PR | build, clippy, fmt, tests, both feature configurations |
+| CI | push, PR | build, clippy, fmt, tests, both feature configurations, a build on the declared minimum Rust version |
 | Interop | push, PR | a wrong cryptographic constant — the only check that can |
 | cargo-deny | push, PR | vulnerable, yanked, or wrongly-licensed dependencies |
 | Dependency review | PR | a new bad dependency, before merge |
