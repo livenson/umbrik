@@ -26,7 +26,7 @@
 //! your threat model, fetch and validate the certificate yourself and use
 //! [`umbrik_core::cert::from_der`] directly.
 
-use ldap3::{LdapConn, Scope, SearchEntry};
+use ldap3::{LdapConn, LdapConnSettings, Scope, SearchEntry};
 use umbrik_core::cert::{self, CertificateRecipient};
 use umbrik_core::error::Error;
 use umbrik_core::keylabel::types;
@@ -267,9 +267,34 @@ pub fn select_certificates(entries: Vec<DirectoryEntry>) -> Lookup {
     out
 }
 
+/// The intermediate CA that issued `esteid.ldap.sk.ee`'s certificate, which that server does not
+/// send.
+///
+/// A TLS server is expected to send the intermediates between its certificate and a root
+/// (RFC 8446 §4.4.2); trust stores hold roots only. SK's directory sends its own certificate
+/// alone, so a client that does not fetch missing intermediates itself — OpenSSL on Linux among
+/// them — fails with "unable to get local issuer certificate". macOS and Windows fetch it from
+/// the certificate's AIA URL, which is why the failure is platform-dependent.
+///
+/// Supplying it here only completes the chain: it still has to verify up to DigiCert Global
+/// Root G2 in the system trust store, so this trusts nothing new. Remove it once SK serves the
+/// full chain. Provenance and fingerprint: `certs/README.md`.
+const SK_INTERMEDIATE_DER: &[u8] =
+    include_bytes!("../certs/digicert-global-g2-tls-rsa-sha256-2020-ca1.der");
+
+fn tls_connector() -> Result<native_tls::TlsConnector, Error> {
+    let intermediate = native_tls::Certificate::from_der(SK_INTERMEDIATE_DER)
+        .map_err(|e| Error::Transport(format!("bundled intermediate certificate: {e}")))?;
+    native_tls::TlsConnector::builder()
+        .add_root_certificate(intermediate)
+        .build()
+        .map_err(|e| Error::Transport(format!("TLS setup failed: {e}")))
+}
+
 /// Raw entries from one directory, before selection.
 fn search_one(directory: &Directory, id_code: &str) -> Result<Vec<DirectoryEntry>, Error> {
-    let mut connection = LdapConn::new(&directory.url).map_err(|e| {
+    let settings = LdapConnSettings::new().set_connector(tls_connector()?);
+    let mut connection = LdapConn::with_settings(settings, &directory.url).map_err(|e| {
         Error::Transport(format!("LDAP connection to {} failed: {e}", directory.url))
     })?;
 
