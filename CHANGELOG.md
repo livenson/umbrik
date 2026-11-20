@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/) — see [`VERSIONING.md`](VERSIONING.md).
 Note that a change to the container wire format is breaking even when the API is untouched.
 
+## [0.4.0] - 2026-11-20
+
+### Breaking changes
+
+- Declare Rust 1.88 as the minimum supported version (#59)
+
 ## [0.3.2] - 2026-11-20
 
 ### Added
