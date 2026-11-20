@@ -1,0 +1,29 @@
+name: Directory certificates
+
+# The eID directories are third-party servers that change without notice. SK's omits its
+# intermediate certificate, which umbrik-ldap supplies from crates/umbrik-ldap/certs/; if SK
+# reissues under a different intermediate, every SK lookup fails while the offline tests stay
+# green. This checks the live servers weekly. It is not a required check: a failure here is news
+# about a server, not about a change in this repository.
+on:
+  schedule:
+    - cron: "17 6 * * 3"
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - crates/umbrik-ldap/certs/**
+      - scripts/check-directory-chain.sh
+      - .github/workflows/directory-chain.yml
+
+permissions: {}
+
+jobs:
+  check:
+    name: Live chain check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: scripts/check-directory-chain.sh
