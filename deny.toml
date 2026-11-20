@@ -12,7 +12,7 @@
 #    is the ordinary arrangement for PKCS#11 and imposes nothing on umbrik. It stays true only
 #    as long as no module is ever bundled, vendored, or statically linked here.
 #
-# Apache-2.0 dependencies (cryptoki, flatbuffers, openssl bindings, rpassword) are permissive and
+# Apache-2.0 dependencies (cryptoki, flatbuffers, rustls, rpassword) are permissive and
 # compatible with MIT. They carry an attribution requirement, which the generated SBOM and
 # release artifacts satisfy.
 

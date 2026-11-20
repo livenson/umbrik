@@ -59,7 +59,6 @@ Debian/Ubuntu:
 
 <!-- ci:install-linux -->
 ```bash
-sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 scripts/install-flatc.sh
 cargo build --release        # binary at target/release/umbrik
 ```
@@ -67,7 +66,6 @@ cargo build --release        # binary at target/release/umbrik
 macOS:
 
 ```bash
-brew install openssl@3 pkg-config
 scripts/install-flatc.sh
 cargo build --release
 ```
@@ -77,8 +75,9 @@ build time, and the compiler must match the `flatbuffers` version pinned in `Car
 packaged one lags and produces code that will not compile. `scripts/install-flatc.sh` reads the
 required version from `Cargo.toml` and fetches it.
 
-OpenSSL is needed only for the eID directory lookup. `cargo build --release --no-default-features`
-gives a binary that needs neither OpenSSL nor any network access.
+No system TLS library is needed: the eID directory lookup uses rustls.
+`cargo build --release --no-default-features` gives a binary without the lookup or PKCS#11 support,
+which makes no network access at all.
 
 The Linux block above is executed verbatim by CI on a clean runner, so these steps cannot rot.
 

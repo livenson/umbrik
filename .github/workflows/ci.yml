@@ -36,10 +36,9 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          # libssl-dev is for native-tls, which umbrik-ldap needs because the SK directory
-          # negotiates a cipher suite rustls will not offer. softhsm2 and opensc give a
-          # software PKCS#11 token, so the card path is tested without hardware.
-          sudo apt-get install -y libssl-dev pkg-config softhsm2 opensc
+          # softhsm2 and opensc give a software PKCS#11 token, so the card path is tested
+          # without hardware.
+          sudo apt-get install -y softhsm2 opensc
           # Not the distribution's flatbuffers-compiler: it lags the pinned crate, and a
           # mismatch generates code that will not compile.
           scripts/install-flatc.sh
@@ -80,10 +79,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config
-          scripts/install-flatc.sh
+        run: scripts/install-flatc.sh
 
       # Runners are x86_64, so no emulation is needed for the reference build.
       - name: Round-trip both directions

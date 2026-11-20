@@ -78,9 +78,9 @@ October 2025.
 | `x86_64-pc-windows-msvc` | full |
 | `{x86_64,aarch64}-unknown-linux-musl` | no default features |
 
-musl builds are static and make no network connections: the eID directory lookup needs OpenSSL,
-because SK's LDAP negotiates a cipher suite rustls will not offer. Windows uses schannel and
-needs no OpenSSL. Every native target is smoke-tested before upload.
+musl builds are static and make no network connections: they are built without the eID
+directory lookup and PKCS#11. No target needs OpenSSL; the lookup uses rustls everywhere. Every
+native target is smoke-tested before upload.
 
 ## Publishing
 

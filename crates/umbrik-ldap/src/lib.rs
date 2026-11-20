@@ -12,12 +12,14 @@
 //!
 //! # TLS
 //!
-//! This crate uses **native-tls**, not rustls, and that is deliberate.
-//! `esteid.ldap.sk.ee` negotiates TLS 1.2 with `AES256-GCM-SHA384` — a static RSA key-exchange
-//! suite providing no forward secrecy, which rustls does not implement and will not offer. A
-//! rustls build fails the handshake outright (`received fatal alert: HandshakeFailure`), and
-//! since that directory is where ID-card certificates actually live, lookups silently return
-//! nothing useful. On Linux this means an OpenSSL dependency at build time.
+//! **rustls** with the `ring` provider, so there is no OpenSSL at build or run time and TLS
+//! behaves the same on every platform. Both directories negotiate TLS 1.3, and ECDHE suites on
+//! TLS 1.2. `esteid.ldap.sk.ee` used to offer only static-RSA key exchange, which rustls
+//! deliberately does not implement; that is why this crate used native-tls before.
+//!
+//! Server certificates are verified against the system trust store. SK's server omits its
+//! intermediate certificate, so this crate supplies it — see `SK_INTERMEDIATE_DER` and
+//! `certs/README.md`.
 //!
 //! # Trust
 //!
@@ -26,7 +28,13 @@
 //! your threat model, fetch and validate the certificate yourself and use
 //! [`umbrik_core::cert::from_der`] directly.
 
+use std::sync::{Arc, OnceLock};
+
 use ldap3::{LdapConn, LdapConnSettings, Scope, SearchEntry};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::client::WebPkiServerVerifier;
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use umbrik_core::cert::{self, CertificateRecipient};
 use umbrik_core::error::Error;
 use umbrik_core::keylabel::types;
@@ -272,28 +280,123 @@ pub fn select_certificates(entries: Vec<DirectoryEntry>) -> Lookup {
 ///
 /// A TLS server is expected to send the intermediates between its certificate and a root
 /// (RFC 8446 §4.4.2); trust stores hold roots only. SK's directory sends its own certificate
-/// alone, so a client that does not fetch missing intermediates itself — OpenSSL on Linux among
-/// them — fails with "unable to get local issuer certificate". macOS and Windows fetch it from
-/// the certificate's AIA URL, which is why the failure is platform-dependent.
+/// alone, and rustls — like OpenSSL — does not fetch a missing intermediate from the AIA URL, so
+/// without this every SK lookup fails with `UnknownIssuer`.
 ///
-/// Supplying it here only completes the chain: it still has to verify up to DigiCert Global
-/// Root G2 in the system trust store, so this trusts nothing new. Remove it once SK serves the
-/// full chain. Provenance and fingerprint: `certs/README.md`.
+/// It is offered to the verifier as an *intermediate*, never as a trust anchor: the chain must
+/// still end at DigiCert Global Root G2 in the system trust store, so this trusts nothing new.
+/// Remove it once SK serves the full chain. Provenance and fingerprint: `certs/README.md`.
 const SK_INTERMEDIATE_DER: &[u8] =
     include_bytes!("../certs/digicert-global-g2-tls-rsa-sha256-2020-ca1.der");
 
-fn tls_connector() -> Result<native_tls::TlsConnector, Error> {
-    let intermediate = native_tls::Certificate::from_der(SK_INTERMEDIATE_DER)
-        .map_err(|e| Error::Transport(format!("bundled intermediate certificate: {e}")))?;
-    native_tls::TlsConnector::builder()
-        .add_root_certificate(intermediate)
+fn tls_error(e: impl std::fmt::Display) -> Error {
+    Error::Transport(format!("TLS setup failed: {e}"))
+}
+
+/// The rustls configuration for every directory connection, built once per process.
+///
+/// Loading the system trust store means reading and parsing every root certificate (on macOS, a
+/// keychain query), so it is not repeated for each directory and each lookup. Only a successful
+/// build is kept: after a failure the next lookup tries again. A process that runs for a long
+/// time keeps the roots it started with.
+fn tls_config() -> Result<Arc<ClientConfig>, Error> {
+    static CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
+    if let Some(config) = CONFIG.get() {
+        return Ok(config.clone());
+    }
+    let config = build_tls_config()?;
+    Ok(CONFIG.get_or_init(|| config).clone())
+}
+
+/// Built here rather than left to ldap3, whose default discards the *entire* system root store
+/// if any single certificate in it fails to load. Here an unreadable certificate is skipped, and
+/// only an empty store is an error.
+fn build_tls_config() -> Result<Arc<ClientConfig>, Error> {
+    let loaded = rustls_native_certs::load_native_certs();
+    let mut roots = RootCertStore::empty();
+    roots.add_parsable_certificates(loaded.certs);
+    if roots.is_empty() {
+        let mut message = "no trusted root certificates found in the system store; install the \
+                           CA certificates package (ca-certificates on Debian and Ubuntu) or set \
+                           SSL_CERT_FILE to a PEM bundle"
+            .to_string();
+        if !loaded.errors.is_empty() {
+            let reasons: Vec<String> = loaded.errors.iter().map(ToString::to_string).collect();
+            message.push_str(&format!(" (errors while loading: {})", reasons.join("; ")));
+        }
+        return Err(tls_error(message));
+    }
+
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let webpki = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider.clone())
         .build()
-        .map_err(|e| Error::Transport(format!("TLS setup failed: {e}")))
+        .map_err(tls_error)?;
+    let verifier = CompletingVerifier {
+        inner: webpki,
+        extra_intermediates: vec![CertificateDer::from(SK_INTERMEDIATE_DER)],
+    };
+
+    let config = ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(tls_error)?
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(verifier))
+        .with_no_client_auth();
+    Ok(Arc::new(config))
+}
+
+/// The standard WebPKI verifier, with intermediates a server omits appended to the ones it sends.
+///
+/// Everything else — the trust anchors, name and validity checks, handshake signatures — is the
+/// unmodified rustls verifier. Appending an intermediate can only help a chain reach a root that
+/// is already trusted; it cannot make an untrusted chain verify.
+#[derive(Debug)]
+struct CompletingVerifier {
+    inner: Arc<WebPkiServerVerifier>,
+    extra_intermediates: Vec<CertificateDer<'static>>,
+}
+
+impl ServerCertVerifier for CompletingVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
+        ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        let mut all = intermediates.to_vec();
+        all.extend(self.extra_intermediates.iter().cloned());
+        self.inner
+            .verify_server_cert(end_entity, &all, server_name, ocsp_response, now)
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.inner.supported_verify_schemes()
+    }
 }
 
 /// Raw entries from one directory, before selection.
 fn search_one(directory: &Directory, id_code: &str) -> Result<Vec<DirectoryEntry>, Error> {
-    let settings = LdapConnSettings::new().set_connector(tls_connector()?);
+    let settings = LdapConnSettings::new().set_config(tls_config()?);
     let mut connection = LdapConn::with_settings(settings, &directory.url).map_err(|e| {
         Error::Transport(format!("LDAP connection to {} failed: {e}", directory.url))
     })?;
@@ -516,5 +619,111 @@ mod tests {
         assert_eq!(directories.len(), 2);
         assert!(directories.iter().any(|d| d.url.contains("sk.ee")));
         assert!(directories.iter().any(|d| d.url.contains("eidpki.ee")));
+    }
+
+    // Chain verification, offline. Fixtures are public certificates; see testdata/README.md.
+    // A fixed time keeps these passing after the server certificate expires.
+
+    const SK_LEAF: &[u8] = include_bytes!("../testdata/esteid-ldap-sk-ee.der");
+    const DIGICERT_ROOT_G2: &[u8] = include_bytes!("../testdata/digicert-global-root-g2.der");
+    const UNRELATED_ROOT: &[u8] = include_bytes!("../testdata/usertrust-rsa-root.der");
+
+    /// 2026-11-20, inside the SK certificate's validity window.
+    fn when() -> UnixTime {
+        UnixTime::since_unix_epoch(std::time::Duration::from_secs(1_795_132_800))
+    }
+
+    fn webpki_with_root(root: &[u8]) -> Arc<WebPkiServerVerifier> {
+        let mut roots = RootCertStore::empty();
+        roots.add(CertificateDer::from(root)).expect("root parses");
+        WebPkiServerVerifier::builder_with_provider(
+            Arc::new(roots),
+            Arc::new(rustls::crypto::ring::default_provider()),
+        )
+        .build()
+        .expect("verifier")
+    }
+
+    fn verify_sk_leaf(
+        verifier: &dyn ServerCertVerifier,
+        name: &str,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        verifier.verify_server_cert(
+            &CertificateDer::from(SK_LEAF),
+            &[], // what esteid.ldap.sk.ee sends besides its own certificate: nothing
+            &ServerName::try_from(name.to_string()).expect("server name"),
+            &[],
+            when(),
+        )
+    }
+
+    fn completing(root: &[u8]) -> CompletingVerifier {
+        CompletingVerifier {
+            inner: webpki_with_root(root),
+            extra_intermediates: vec![CertificateDer::from(SK_INTERMEDIATE_DER)],
+        }
+    }
+
+    #[test]
+    fn sk_chain_is_incomplete_without_the_bundled_intermediate() {
+        let plain = webpki_with_root(DIGICERT_ROOT_G2);
+        let err = verify_sk_leaf(plain.as_ref(), "esteid.ldap.sk.ee").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer)
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn bundled_intermediate_completes_the_sk_chain() {
+        verify_sk_leaf(&completing(DIGICERT_ROOT_G2), "esteid.ldap.sk.ee")
+            .expect("leaf + bundled intermediate should chain to DigiCert Global Root G2");
+    }
+
+    #[test]
+    fn bundled_intermediate_is_not_a_trust_anchor() {
+        // Without its root in the store, the intermediate alone must verify nothing.
+        let err = verify_sk_leaf(&completing(UNRELATED_ROOT), "esteid.ldap.sk.ee").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer)
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn completing_verifier_still_checks_the_server_name() {
+        let err = verify_sk_leaf(&completing(DIGICERT_ROOT_G2), "ldap.eidpki.ee").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                rustls::Error::InvalidCertificate(
+                    rustls::CertificateError::NotValidForName
+                        | rustls::CertificateError::NotValidForNameContext { .. }
+                )
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn tls_config_builds_from_the_system_store() {
+        // This depends on the machine, not the code: a minimal container or a build sandbox may
+        // have no CA bundle at all. Skip there rather than fail.
+        if rustls_native_certs::load_native_certs().certs.is_empty() {
+            eprintln!("skipping: no system root certificates on this machine");
+            return;
+        }
+        let first = tls_config().expect("system trust store should yield a usable config");
+        let second = tls_config().expect("cached config");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "the config is built once per process"
+        );
     }
 }

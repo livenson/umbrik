@@ -4,8 +4,8 @@
 
 The intermediate CA that issued `esteid.ldap.sk.ee`'s TLS certificate. SK's directory does not
 send it during the handshake, so clients that do not fetch missing intermediates themselves
-(OpenSSL on Linux, rustls) cannot build a chain to a trusted root. See `SK_INTERMEDIATE_DER` in
-`src/lib.rs`.
+(rustls, which umbrik uses; OpenSSL) cannot build a chain to a trusted root. See
+`SK_INTERMEDIATE_DER` and `CompletingVerifier` in `src/lib.rs`.
 
 | | |
 |---|---|
@@ -18,9 +18,9 @@ send it during the handshake, so clients that do not fetch missing intermediates
 
 The source is the CA Issuers URL in the server certificate's Authority Information Access
 extension. Its Subject Key Identifier matches that certificate's Authority Key Identifier, and it
-verifies against DigiCert Global Root G2 from the system trust store. It is supplied to the TLS
-stack as an extra trust anchor. Because it is itself issued by a public root, it grants no trust
-the system store did not already imply.
+verifies against DigiCert Global Root G2 from the system trust store. It is appended to the
+intermediates the server sends, never added as a trust anchor: the chain must still end at a root
+in the system store, so it grants no new trust. The tests in `src/lib.rs` check both properties.
 
 Check the file:
 
@@ -36,5 +36,5 @@ echo | openssl s_client -connect esteid.ldap.sk.ee:636 -servername esteid.ldap.s
 ```
 
 **Remove** the file and `SK_INTERMEDIATE_DER` once SK serves the full chain. **Replace** them if
-SK's server certificate is reissued under a different intermediate. Lookups on Linux will then
-fail with "unable to get local issuer certificate" again until this is updated.
+SK's server certificate is reissued under a different intermediate. Every SK lookup will then
+fail with `UnknownIssuer` again until this is updated.
