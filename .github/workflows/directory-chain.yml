@@ -1,9 +1,9 @@
 name: Directory certificates
 
-# The eID directories are third-party servers that change without notice. SK's omits its
-# intermediate certificate, which umbrik-ldap supplies from crates/umbrik-ldap/certs/; if SK
-# reissues under a different intermediate, every SK lookup fails while the offline tests stay
-# green. This checks the live servers weekly. It is not a required check: a failure here is news
+# The eID directories are third-party servers that change without notice. rustls does not fetch
+# an intermediate a server leaves out, so if a directory stops sending its full chain (SK did until
+# 2026-11), every lookup against it fails while the offline tests stay green. This checks the live
+# servers weekly. It is not a required check: a failure here is news
 # about a server, not about a change in this repository.
 on:
   schedule:
@@ -12,7 +12,6 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - crates/umbrik-ldap/certs/**
       - scripts/check-directory-chain.sh
       - .github/workflows/directory-chain.yml
 

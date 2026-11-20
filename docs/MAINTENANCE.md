@@ -16,7 +16,7 @@ below is what keeps those pins from going stale.
 | CodeQL | push, PR, weekly | cryptographic misuse, injection, unsafe untrusted input |
 | Dependabot | weekly | stale pins; security updates arrive separately |
 | Scorecard | weekly | repository posture: branch protection, token scope, pinned actions |
-| Directory certificates | weekly, manual | an eID directory's certificate no longer verifying the way umbrik-ldap verifies it (e.g. SK reissuing under a new intermediate); not a required check |
+| Directory certificates | weekly, manual | an eID directory's certificate no longer verifying the way umbrik-ldap verifies it (e.g. a server leaving its intermediate out of the chain); not a required check |
 | Release | `v*` tag | seven targets, SBOM, signatures |
 
 ## Dependabot

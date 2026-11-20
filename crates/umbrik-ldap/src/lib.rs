@@ -17,9 +17,9 @@
 //! TLS 1.2. `esteid.ldap.sk.ee` used to offer only static-RSA key exchange, which rustls
 //! deliberately does not implement; that is why this crate used native-tls before.
 //!
-//! Server certificates are verified against the system trust store. SK's server omits its
-//! intermediate certificate, so this crate supplies it — see `SK_INTERMEDIATE_DER` and
-//! `certs/README.md`.
+//! Server certificates are verified against the system trust store, with the standard rustls
+//! WebPKI verifier. Like OpenSSL, rustls does not fetch an intermediate a server leaves out, so a
+//! directory must send its full chain. `scripts/check-directory-chain.sh` checks that weekly.
 //!
 //! # Trust
 //!
@@ -31,10 +31,8 @@
 use std::sync::{Arc, OnceLock};
 
 use ldap3::{LdapConn, LdapConnSettings, Scope, SearchEntry};
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::client::WebPkiServerVerifier;
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
+use rustls::{ClientConfig, RootCertStore};
 use umbrik_core::cert::{self, CertificateRecipient};
 use umbrik_core::error::Error;
 use umbrik_core::keylabel::types;
@@ -275,20 +273,6 @@ pub fn select_certificates(entries: Vec<DirectoryEntry>) -> Lookup {
     out
 }
 
-/// The intermediate CA that issued `esteid.ldap.sk.ee`'s certificate, which that server does not
-/// send.
-///
-/// A TLS server is expected to send the intermediates between its certificate and a root
-/// (RFC 8446 §4.4.2); trust stores hold roots only. SK's directory sends its own certificate
-/// alone, and rustls — like OpenSSL — does not fetch a missing intermediate from the AIA URL, so
-/// without this every SK lookup fails with `UnknownIssuer`.
-///
-/// It is offered to the verifier as an *intermediate*, never as a trust anchor: the chain must
-/// still end at DigiCert Global Root G2 in the system trust store, so this trusts nothing new.
-/// Remove it once SK serves the full chain. Provenance and fingerprint: `certs/README.md`.
-const SK_INTERMEDIATE_DER: &[u8] =
-    include_bytes!("../certs/digicert-global-g2-tls-rsa-sha256-2020-ca1.der");
-
 fn tls_error(e: impl std::fmt::Display) -> Error {
     Error::Transport(format!("TLS setup failed: {e}"))
 }
@@ -327,71 +311,23 @@ fn build_tls_config() -> Result<Arc<ClientConfig>, Error> {
         return Err(tls_error(message));
     }
 
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let webpki = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider.clone())
-        .build()
-        .map_err(tls_error)?;
-    let verifier = CompletingVerifier {
-        inner: webpki,
-        extra_intermediates: vec![CertificateDer::from(SK_INTERMEDIATE_DER)],
-    };
-
-    let config = ClientConfig::builder_with_provider(provider)
+    let config = ClientConfig::builder_with_provider(provider())
         .with_safe_default_protocol_versions()
         .map_err(tls_error)?
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(verifier))
+        .with_webpki_verifier(server_verifier(roots)?)
         .with_no_client_auth();
     Ok(Arc::new(config))
 }
 
-/// The standard WebPKI verifier, with intermediates a server omits appended to the ones it sends.
-///
-/// Everything else — the trust anchors, name and validity checks, handshake signatures — is the
-/// unmodified rustls verifier. Appending an intermediate can only help a chain reach a root that
-/// is already trusted; it cannot make an untrusted chain verify.
-#[derive(Debug)]
-struct CompletingVerifier {
-    inner: Arc<WebPkiServerVerifier>,
-    extra_intermediates: Vec<CertificateDer<'static>>,
+fn provider() -> Arc<rustls::crypto::CryptoProvider> {
+    Arc::new(rustls::crypto::ring::default_provider())
 }
 
-impl ServerCertVerifier for CompletingVerifier {
-    fn verify_server_cert(
-        &self,
-        end_entity: &CertificateDer<'_>,
-        intermediates: &[CertificateDer<'_>],
-        server_name: &ServerName<'_>,
-        ocsp_response: &[u8],
-        now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        let mut all = intermediates.to_vec();
-        all.extend(self.extra_intermediates.iter().cloned());
-        self.inner
-            .verify_server_cert(end_entity, &all, server_name, ocsp_response, now)
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        self.inner.verify_tls12_signature(message, cert, dss)
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        self.inner.verify_tls13_signature(message, cert, dss)
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.inner.supported_verify_schemes()
-    }
+/// The unmodified rustls WebPKI verifier over `roots`: chain, name, validity, signatures.
+fn server_verifier(roots: RootCertStore) -> Result<Arc<WebPkiServerVerifier>, Error> {
+    WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider())
+        .build()
+        .map_err(tls_error)
 }
 
 /// Raw entries from one directory, before selection.
@@ -624,7 +560,13 @@ mod tests {
     // Chain verification, offline. Fixtures are public certificates; see testdata/README.md.
     // A fixed time keeps these passing after the server certificate expires.
 
+    use rustls::client::danger::{ServerCertVerified, ServerCertVerifier};
+    use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+
+    /// The chain `esteid.ldap.sk.ee` sends: its own certificate, then its intermediate.
     const SK_LEAF: &[u8] = include_bytes!("../testdata/esteid-ldap-sk-ee.der");
+    const SK_INTERMEDIATE: &[u8] =
+        include_bytes!("../testdata/digicert-global-g2-tls-rsa-sha256-2020-ca1.der");
     const DIGICERT_ROOT_G2: &[u8] = include_bytes!("../testdata/digicert-global-root-g2.der");
     const UNRELATED_ROOT: &[u8] = include_bytes!("../testdata/usertrust-rsa-root.der");
 
@@ -633,41 +575,42 @@ mod tests {
         UnixTime::since_unix_epoch(std::time::Duration::from_secs(1_795_132_800))
     }
 
-    fn webpki_with_root(root: &[u8]) -> Arc<WebPkiServerVerifier> {
+    /// The verifier `build_tls_config` installs, over a single given root.
+    fn verifier_trusting(root: &[u8]) -> Arc<WebPkiServerVerifier> {
         let mut roots = RootCertStore::empty();
         roots.add(CertificateDer::from(root)).expect("root parses");
-        WebPkiServerVerifier::builder_with_provider(
-            Arc::new(roots),
-            Arc::new(rustls::crypto::ring::default_provider()),
-        )
-        .build()
-        .expect("verifier")
+        server_verifier(roots).expect("verifier")
     }
 
-    fn verify_sk_leaf(
+    fn verify_sk_chain(
         verifier: &dyn ServerCertVerifier,
         name: &str,
     ) -> Result<ServerCertVerified, rustls::Error> {
         verifier.verify_server_cert(
             &CertificateDer::from(SK_LEAF),
-            &[], // what esteid.ldap.sk.ee sends besides its own certificate: nothing
+            &[CertificateDer::from(SK_INTERMEDIATE)],
             &ServerName::try_from(name.to_string()).expect("server name"),
             &[],
             when(),
         )
     }
 
-    fn completing(root: &[u8]) -> CompletingVerifier {
-        CompletingVerifier {
-            inner: webpki_with_root(root),
-            extra_intermediates: vec![CertificateDer::from(SK_INTERMEDIATE_DER)],
-        }
+    #[test]
+    fn sk_served_chain_verifies() {
+        verify_sk_chain(
+            verifier_trusting(DIGICERT_ROOT_G2).as_ref(),
+            "esteid.ldap.sk.ee",
+        )
+        .expect("SK's served chain should reach DigiCert Global Root G2");
     }
 
     #[test]
-    fn sk_chain_is_incomplete_without_the_bundled_intermediate() {
-        let plain = webpki_with_root(DIGICERT_ROOT_G2);
-        let err = verify_sk_leaf(plain.as_ref(), "esteid.ldap.sk.ee").unwrap_err();
+    fn sk_chain_is_rejected_without_its_root() {
+        let err = verify_sk_chain(
+            verifier_trusting(UNRELATED_ROOT).as_ref(),
+            "esteid.ldap.sk.ee",
+        )
+        .unwrap_err();
         assert!(
             matches!(
                 err,
@@ -678,27 +621,12 @@ mod tests {
     }
 
     #[test]
-    fn bundled_intermediate_completes_the_sk_chain() {
-        verify_sk_leaf(&completing(DIGICERT_ROOT_G2), "esteid.ldap.sk.ee")
-            .expect("leaf + bundled intermediate should chain to DigiCert Global Root G2");
-    }
-
-    #[test]
-    fn bundled_intermediate_is_not_a_trust_anchor() {
-        // Without its root in the store, the intermediate alone must verify nothing.
-        let err = verify_sk_leaf(&completing(UNRELATED_ROOT), "esteid.ldap.sk.ee").unwrap_err();
-        assert!(
-            matches!(
-                err,
-                rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer)
-            ),
-            "{err:?}"
-        );
-    }
-
-    #[test]
-    fn completing_verifier_still_checks_the_server_name() {
-        let err = verify_sk_leaf(&completing(DIGICERT_ROOT_G2), "ldap.eidpki.ee").unwrap_err();
+    fn verifier_checks_the_server_name() {
+        let err = verify_sk_chain(
+            verifier_trusting(DIGICERT_ROOT_G2).as_ref(),
+            "ldap.eidpki.ee",
+        )
+        .unwrap_err();
         assert!(
             matches!(
                 err,

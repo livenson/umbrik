@@ -54,7 +54,7 @@ pyo3 = { version = "=0.29.3", features = ["abi3-py310"] }
 # rustls with the ring provider: no OpenSSL at build or run time. Both directories offer
 # TLS 1.3 and ECDHE on TLS 1.2. (SK once offered only static-RSA suites, which rustls does not
 # implement; that is why this used to be native-tls.) umbrik-ldap builds its own ClientConfig, so
-# the roots and the intermediate SK omits are under its control — see crates/umbrik-ldap/certs.
+# loading the system roots is under its control.
 ldap3 = { version = "=0.12.1", default-features = false, features = ["sync", "tls-rustls-ring"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "=0.8.5"
