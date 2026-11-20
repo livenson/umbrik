@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 adheres to [Semantic Versioning](https://semver.org/) — see [`VERSIONING.md`](VERSIONING.md).
 Note that a change to the container wire format is breaking even when the API is untouched.
 
+## [0.3.2] - 2026-11-20
+
+### Added
+
+- Use rustls instead of OpenSSL for directory lookups (#54)
+
+### Fixed
+
+- Finalize the module when a provider is dropped (#51)
+- Supply the intermediate certificate esteid.ldap.sk.ee omits (#52)
+- Drop the bundled SK intermediate now that SK sends it (#57)
+
+### Dependencies
+
+- Bump the actions group with 4 updates (#49)
+- Bump the rust-dependencies group across 1 directory with 4 updates (#53)
+
 ## [0.3.1] - 2026-11-08
 
 ### Fixed
